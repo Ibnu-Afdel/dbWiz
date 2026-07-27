@@ -59,6 +59,10 @@ func newPicker(containers []docker.Container, create bool) Screen {
 
 func (s pickerScreen) Init() tea.Cmd { return nil }
 
+// CapturesText is true while the list's type-to-filter input is active, so a
+// digit filters instead of switching tabs. Satisfies screens.TextInputer.
+func (s pickerScreen) CapturesText() bool { return s.list.SettingFilter() }
+
 func (s pickerScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:

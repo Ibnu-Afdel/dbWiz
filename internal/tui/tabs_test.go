@@ -77,17 +77,47 @@ func TestSingleTabHasNoTabBar(t *testing.T) {
 	}
 }
 
-// TestAltDigitSwitchesTab verifies alt+N jumps directly to a tab by position.
-func TestAltDigitSwitchesTab(t *testing.T) {
+// TestDigitSwitchesTab verifies a bare number key jumps directly to a tab by
+// position — the tmux-friendly switch (no modifier, no extended-keys protocol).
+func TestDigitSwitchesTab(t *testing.T) {
 	m, _ := dashboardTab(t)
 	m = send(m, ctrlKey('t')) // now 2 tabs, active=1 (detect)
 
-	m = send(m, tea.KeyPressMsg{Code: '1', Mod: tea.ModAlt})
+	m = send(m, tea.KeyPressMsg{Code: '1', Text: "1"})
 	if m.active != 0 {
-		t.Fatalf("alt+1 should focus tab 0, active=%d", m.active)
+		t.Fatalf("pressing 1 should focus tab 0, active=%d", m.active)
 	}
 	if got := view(m); !strings.Contains(got, "Navigator") {
-		t.Errorf("alt+1 should show the dashboard tab, got:\n%s", got)
+		t.Errorf("pressing 1 should show the dashboard tab, got:\n%s", got)
+	}
+}
+
+// TestDigitIgnoredWithSingleTab verifies a digit is left alone when only one tab
+// is open, so the single-target experience never steals number keys from a
+// screen.
+func TestDigitIgnoredWithSingleTab(t *testing.T) {
+	m, _ := dashboardTab(t)
+	_, _, handled := m.handleGlobalKey(tea.KeyPressMsg{Code: '1', Text: "1"})
+	if handled {
+		t.Error("with one tab open, a digit should pass through to the screen")
+	}
+}
+
+// TestDigitTypesIntoEditor verifies that when the SQL editor has focus, a digit
+// is left for the editor rather than switching tabs — even with several tabs
+// open.
+func TestDigitTypesIntoEditor(t *testing.T) {
+	m, _ := dashboardTab(t)
+	m = send(m, ctrlKey('t'))                          // 2 tabs, active=1 (detect)
+	m = send(m, tea.KeyPressMsg{Code: '1', Text: "1"}) // back to the dashboard tab
+	m = send(m, tea.KeyPressMsg{Code: 'e', Text: "e"}) // focus the SQL editor
+
+	if !m.capturingText() {
+		t.Fatal("editor focus should report capturing text")
+	}
+	_, _, handled := m.handleGlobalKey(tea.KeyPressMsg{Code: '2', Text: "2"})
+	if handled {
+		t.Error("a digit typed into the focused editor must not switch tabs")
 	}
 }
 
@@ -95,8 +125,8 @@ func TestAltDigitSwitchesTab(t *testing.T) {
 // closes the engine it owned, leaving the remaining tab focused.
 func TestCloseTabReleasesConnection(t *testing.T) {
 	m, closed := dashboardTab(t)
-	m = send(m, ctrlKey('t'))                                // open a second (detect) tab
-	m = send(m, tea.KeyPressMsg{Code: '1', Mod: tea.ModAlt}) // focus the dashboard tab
+	m = send(m, ctrlKey('t'))                          // open a second (detect) tab
+	m = send(m, tea.KeyPressMsg{Code: '1', Text: "1"}) // focus the dashboard tab
 
 	m = send(m, ctrlKey('w'))
 
@@ -124,13 +154,18 @@ func TestCloseLastTabQuits(t *testing.T) {
 	}
 }
 
-// TestNextTabCycles verifies ctrl+tab wraps around the open tabs.
-func TestNextTabCycles(t *testing.T) {
+// TestOutOfRangeDigitIsSwallowed verifies a tab number with no matching tab is
+// consumed (not passed to the screen) rather than doing something surprising.
+func TestOutOfRangeDigitIsSwallowed(t *testing.T) {
 	m, _ := dashboardTab(t)
-	m = send(m, ctrlKey('t')) // 2 tabs, active=1
+	m = send(m, ctrlKey('t')) // 2 tabs
 
-	m = send(m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModCtrl})
-	if m.active != 0 {
-		t.Fatalf("ctrl+tab from tab 1 of 2 should wrap to 0, active=%d", m.active)
+	before := m.active
+	_, _, handled := m.handleGlobalKey(tea.KeyPressMsg{Code: '9', Text: "9"})
+	if !handled {
+		t.Error("an out-of-range tab digit should be swallowed")
+	}
+	if m.active != before {
+		t.Errorf("out-of-range digit should not change the active tab")
 	}
 }

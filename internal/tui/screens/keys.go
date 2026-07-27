@@ -11,11 +11,12 @@ type KeyMap struct {
 	Quit key.Binding
 	Help key.Binding
 
-	// Tabs (v2 Phase 1) — multiple targets open at once. NextTab cycles; NewTab
-	// opens a fresh detection tab; CloseTab closes the active one.
-	NewTab   key.Binding
-	NextTab  key.Binding
-	CloseTab key.Binding
+	// Tabs (v2 Phase 1) — multiple targets open at once. SwitchTab jumps to a tab
+	// by number; NewTab opens a fresh detection tab; CloseTab closes the active
+	// one.
+	NewTab    key.Binding
+	SwitchTab key.Binding
+	CloseTab  key.Binding
 
 	// Navigation shared across screens.
 	Up     key.Binding
@@ -57,16 +58,19 @@ var Keys = KeyMap{
 		key.WithKeys("?"),
 		key.WithHelp("?", "help"),
 	),
-	// Tab keys use ctrl/alt modifiers so they never collide with a screen's own
-	// typing (the SQL editor, the SQLite path input). alt+1…9 jumps straight to a
-	// tab; ctrl+tab cycles for terminals that report it.
+	// Tab keys are chosen to survive a multiplexer: ctrl+letter combos and plain
+	// digits pass through tmux untouched, unlike ctrl+tab or alt+digit (which
+	// need the extended-keys protocol tmux doesn't forward). New/close use
+	// ctrl+t / ctrl+w; switching is by the tab's number (1–9), which the root
+	// only claims when several tabs are open and the active screen isn't taking
+	// text input — so a digit still types into the SQL editor or a path field.
 	NewTab: key.NewBinding(
 		key.WithKeys("ctrl+t"),
 		key.WithHelp("^t", "new tab"),
 	),
-	NextTab: key.NewBinding(
-		key.WithKeys("ctrl+tab"),
-		key.WithHelp("^tab", "switch tab"),
+	SwitchTab: key.NewBinding(
+		key.WithKeys("1", "2", "3", "4", "5", "6", "7", "8", "9"),
+		key.WithHelp("1-9", "switch tab"),
 	),
 	CloseTab: key.NewBinding(
 		key.WithKeys("ctrl+w"),

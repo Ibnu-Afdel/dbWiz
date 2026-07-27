@@ -65,6 +65,10 @@ func (s connectScreen) Init() tea.Cmd {
 	return tea.Batch(s.spinner.Tick, connectCmd(s.container, db.Target{}, false))
 }
 
+// CapturesText is true while the masked password prompt is up, so a digit typed
+// into a password isn't stolen as a tab switch. Satisfies screens.TextInputer.
+func (s connectScreen) CapturesText() bool { return s.mode == modePrompting }
+
 func (s connectScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case connectedMsg:

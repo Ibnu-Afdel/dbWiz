@@ -7,7 +7,6 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -129,14 +128,29 @@ func (m model) handleGlobalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 		return m.openTab()
 	case key.Matches(msg, screens.Keys.CloseTab):
 		return m.closeTab()
-	case key.Matches(msg, screens.Keys.NextTab):
-		return m.switchTab((m.active + 1) % len(m.tabs))
 	}
-	// alt+1…9 jumps directly to a tab by position.
-	if n, ok := altDigit(msg); ok && n >= 1 && n <= len(m.tabs) {
-		return m.switchTab(n - 1)
+	// A plain digit jumps to that tab — but only with several tabs open and when
+	// the active screen isn't taking text input, so a number still types into the
+	// SQL editor or a path field. Chosen over ctrl+tab / alt+digit because bare
+	// digits and ctrl-letters are what survives tmux.
+	if len(m.tabs) > 1 && !m.capturingText() {
+		if n, ok := tabDigit(msg); ok {
+			if n >= 1 && n <= len(m.tabs) {
+				return m.switchTab(n - 1)
+			}
+			return m, nil, true // swallow an out-of-range tab number
+		}
 	}
 	return m, nil, false
+}
+
+// capturingText reports whether the active screen is currently taking free text,
+// so the root can leave printable keys (digits) alone for it.
+func (m model) capturingText() bool {
+	if ti, ok := m.top().(screens.TextInputer); ok {
+		return ti.CapturesText()
+	}
+	return false
 }
 
 // openTab appends a fresh detection tab and switches to it, so a second target
@@ -230,7 +244,7 @@ func (m model) helpBindings() []key.Binding {
 	b := append([]key.Binding{}, m.top().Help()...)
 	b = append(b, screens.Keys.NewTab)
 	if len(m.tabs) > 1 {
-		b = append(b, screens.Keys.NextTab, screens.Keys.CloseTab)
+		b = append(b, screens.Keys.SwitchTab, screens.Keys.CloseTab)
 	}
 	return append(b, screens.Keys.Help, screens.Keys.Quit)
 }
@@ -257,12 +271,15 @@ type keymap struct{ bindings []key.Binding }
 func (k keymap) ShortHelp() []key.Binding  { return k.bindings }
 func (k keymap) FullHelp() [][]key.Binding { return [][]key.Binding{k.bindings} }
 
-// altDigit reports whether msg is alt+<digit> and returns the digit, so the root
-// can jump straight to a tab by number.
-func altDigit(msg tea.KeyPressMsg) (int, bool) {
-	s := msg.String()
-	if after, ok := strings.CutPrefix(s, "alt+"); ok && len(after) == 1 && after[0] >= '1' && after[0] <= '9' {
-		return int(after[0] - '0'), true
+// tabDigit reports whether msg is a bare digit 1–9 (no modifiers) and returns
+// its value, so the root can jump straight to a tab by number. It ignores any
+// modified digit (ctrl/alt) so those stay available to screens.
+func tabDigit(msg tea.KeyPressMsg) (int, bool) {
+	if msg.Mod != 0 {
+		return 0, false
+	}
+	if s := msg.String(); len(s) == 1 && s[0] >= '1' && s[0] <= '9' {
+		return int(s[0] - '0'), true
 	}
 	return 0, false
 }

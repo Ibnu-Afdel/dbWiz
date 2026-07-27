@@ -204,6 +204,17 @@ func NewDashboard(engine db.Engine, target db.Target, c docker.Container) Screen
 // (a container name, or a SQLite file's base name). It satisfies screens.Titled.
 func (s dashboardScreen) Title() string { return s.container.Name }
 
+// CapturesText reports whether the dashboard is currently taking free text, so
+// the root leaves digit keys for it instead of switching tabs: while a create
+// form or type-the-name confirm is open, or while the SQL editor has focus. It
+// satisfies screens.TextInputer.
+func (s dashboardScreen) CapturesText() bool {
+	if s.mode == modeForm || s.mode == modeConfirm {
+		return true
+	}
+	return s.mode == modeBrowse && s.focus == focusEditor
+}
+
 // Close releases the live engine. It satisfies screens.Closer so the root can
 // tear down a background target's connection when its whole tab is closed
 // without the dashboard ever handling Back. Closing the engine twice is

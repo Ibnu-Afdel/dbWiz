@@ -54,6 +54,10 @@ func NewSQLiteOpen() Screen {
 
 func (s sqliteOpenScreen) Init() tea.Cmd { return textinput.Blink }
 
+// CapturesText is always true here: the whole screen is a path input, so a digit
+// belongs in the path, never a tab switch. Satisfies screens.TextInputer.
+func (s sqliteOpenScreen) CapturesText() bool { return true }
+
 func (s sqliteOpenScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sqliteOpenedMsg:

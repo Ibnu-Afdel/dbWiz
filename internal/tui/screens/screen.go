@@ -32,6 +32,15 @@ type Titled interface {
 	Title() string
 }
 
+// TextInputer is implemented by screens that are currently capturing free text
+// (a focused editor, a name/password field, a list filter). The root asks the
+// active screen this before treating a plain digit as a tab-switch, so a number
+// still types into the SQL editor or a path field instead of jumping tabs. A
+// screen that doesn't implement it is assumed not to be capturing text.
+type TextInputer interface {
+	CapturesText() bool
+}
+
 // Closer is implemented by screens that own a resource needing release — the
 // dashboard owns a live engine. The root calls Close when it discards a screen
 // that will never be returned to (closing a whole tab), so a background target's
