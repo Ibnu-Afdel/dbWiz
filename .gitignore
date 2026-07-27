@@ -1,3 +1,10 @@
-PRD.md
-ROADMAP.md
-RULES.md
+# Planning pipeline (local context for Ibnu + AI agents — never committed)
+plan/
+
+# Editor
+.vscode/
+
+# Build artifacts
+/dbwiz
+dist/
+*.log
