@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Ibnu-Afdel/dbwiz/cmd"
 	"github.com/Ibnu-Afdel/dbwiz/internal/tui"
 )
 
@@ -37,6 +38,9 @@ var rootCmd = &cobra.Command{
 
 // main executes the root command.
 func main() {
+	// Scripting subcommands (v2 on) live in package cmd; the bare `dbwiz` still
+	// launches the TUI via rootCmd's RunE.
+	rootCmd.AddCommand(cmd.NewUseCommand())
 	// "dbwiz v1.0.0" rather than cobra's default "dbwiz version v1.0.0".
 	rootCmd.SetVersionTemplate("dbwiz {{.Version}}\n")
 	if err := rootCmd.Execute(); err != nil {
