@@ -59,6 +59,7 @@ func (s sqliteOpenScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sqliteOpenedMsg:
 		rememberRecent(msg.path)
+		rememberSQLite(msg.path) // persist across sessions (v2 Step 1.2/1.3)
 		return s, Push(NewDashboard(msg.engine, msg.target, docker.Container{
 			Name:   filepath.Base(msg.path),
 			Engine: docker.EngineUnknown,

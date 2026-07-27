@@ -99,6 +99,10 @@ func runningPG() docker.Container {
 // restores them afterwards.
 func swapSeams(t *testing.T, detect func(context.Context) ([]docker.Container, error), engine db.Engine) {
 	t.Helper()
+	// Isolate the state cache so these scenarios neither read the developer's
+	// real last-used target (which would add a "continue" row and shift the menu)
+	// nor write to it when a connection lands.
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	oldDetect, oldEngine := screens.DetectFn, screens.NewEngineFn
 	screens.DetectFn = detect
 	screens.NewEngineFn = func(db.Kind) (db.Engine, error) { return engine, nil }

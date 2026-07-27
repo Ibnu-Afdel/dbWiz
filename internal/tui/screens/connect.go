@@ -68,6 +68,9 @@ func (s connectScreen) Init() tea.Cmd {
 func (s connectScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case connectedMsg:
+		// Remember this container so a later launch can offer to continue here
+		// (v2 Step 1.2). Best-effort: a cache write must never block connecting.
+		rememberDocker(msg.container)
 		if s.create {
 			return s, Replace(NewDashboardCreating(msg.engine, msg.target, msg.container))
 		}

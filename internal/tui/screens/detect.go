@@ -37,7 +37,7 @@ func (s detectScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			// which offers rescan and the SQLite route so it's never a dead end.
 			return s, Replace(emptyStateError())
 		}
-		return s, Replace(NewHome(msg.containers))
+		return s, Replace(NewHomeContinuing(msg.containers))
 	case detectErrMsg:
 		return s, Replace(NewErrorFromDocker(msg.err, retryRescan))
 	case spinner.TickMsg:

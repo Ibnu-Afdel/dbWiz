@@ -2,6 +2,7 @@ package screens
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -11,23 +12,28 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/Ibnu-Afdel/dbwiz/internal/docker"
+	"github.com/Ibnu-Afdel/dbwiz/internal/state"
 	"github.com/Ibnu-Afdel/dbwiz/internal/tui/styles"
 )
 
-// homeChoice is a menu row on the home screen. The order here is the on-screen
-// order and matches the product's intent-classifying menu.
+// homeChoice is a menu row on the home screen. The constant order is the
+// canonical on-screen order; which rows actually appear is decided per-visit in
+// the choices slice (the continue row shows only when there's something to
+// resume).
 type homeChoice int
 
 const (
-	choiceExisting homeChoice = iota
+	choiceContinue homeChoice = iota
+	choiceExisting
 	choiceCreate
 	choiceSQLite
 	choiceRescan
-	numChoices
 )
 
 func (c homeChoice) label() string {
 	switch c {
+	case choiceContinue:
+		return "Continue where you left off"
 	case choiceExisting:
 		return "Use an existing database"
 	case choiceCreate:
@@ -40,22 +46,72 @@ func (c homeChoice) label() string {
 	return ""
 }
 
+// continueTarget is the resolved "pick up where you left off" option: the
+// remembered target and the command that reconnects to it.
+type continueTarget struct {
+	target state.Target
+	route  tea.Cmd
+}
+
 // homeScreen is the route-classifying menu shown after detection. It lists the
 // detected containers inline and can start a stopped one without leaving the
-// screen (async, with a spinner), then re-scans.
+// screen (async, with a spinner), then re-scans. When the last session's target
+// is still reachable it offers a continue row at the top.
 type homeScreen struct {
 	containers []docker.Container
-	cursor     homeChoice
+	cont       *continueTarget
+	choices    []homeChoice
+	cursor     int
 
 	starting bool // a docker start is in flight
 	spinner  spinner.Model
 }
 
-// NewHome builds the home menu from a completed scan.
+// NewHome builds the home menu from a completed scan, without a continue row.
 func NewHome(containers []docker.Container) Screen {
-	s := spinner.New(spinner.WithSpinner(spinner.Dot))
-	s.Style = styles.Selected
-	return homeScreen{containers: containers, spinner: s}
+	return newHome(containers, nil)
+}
+
+// NewHomeContinuing is NewHome that also resolves the last-used target from the
+// state cache and, if it's still reachable, offers it as the first menu row —
+// the production entry point the detect screen uses (v2 Step 1.2).
+func NewHomeContinuing(containers []docker.Container) Screen {
+	return newHome(containers, resolveContinue(containers))
+}
+
+func newHome(containers []docker.Container, cont *continueTarget) Screen {
+	sp := spinner.New(spinner.WithSpinner(spinner.Dot))
+	sp.Style = styles.Selected
+	choices := []homeChoice{}
+	if cont != nil {
+		choices = append(choices, choiceContinue)
+	}
+	choices = append(choices, choiceExisting, choiceCreate, choiceSQLite, choiceRescan)
+	return homeScreen{containers: containers, cont: cont, choices: choices, spinner: sp}
+}
+
+// resolveContinue turns the remembered last target into a selectable option, but
+// only when it's actually reachable now: a Docker target must be present and
+// running in this scan; a SQLite target's file must still exist. Otherwise the
+// row is omitted rather than offering a dead link.
+func resolveContinue(containers []docker.Container) *continueTarget {
+	last := state.Load().Last
+	if last == nil {
+		return nil
+	}
+	switch last.Kind {
+	case state.KindDocker:
+		for _, c := range containers {
+			if c.Name == last.Container && c.State == docker.StateRunning {
+				return &continueTarget{target: *last, route: Push(NewConnect(c))}
+			}
+		}
+	case state.KindSQLite:
+		if _, err := os.Stat(last.Path); err == nil {
+			return &continueTarget{target: *last, route: openSQLiteCmd(last.Path)}
+		}
+	}
+	return nil
 }
 
 func (s homeScreen) Init() tea.Cmd { return nil }
@@ -93,7 +149,7 @@ func (s homeScreen) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		}
 		return s, nil
 	case key.Matches(msg, Keys.Down):
-		if s.cursor < numChoices-1 {
+		if s.cursor < len(s.choices)-1 {
 			s.cursor++
 		}
 		return s, nil
@@ -109,7 +165,11 @@ func (s homeScreen) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 
 // choose acts on the highlighted menu row.
 func (s homeScreen) choose() (Screen, tea.Cmd) {
-	switch s.cursor {
+	switch s.choices[s.cursor] {
+	case choiceContinue:
+		if s.cont != nil {
+			return s, s.cont.route
+		}
 	case choiceExisting:
 		return s, existingRoute(s.containers)
 	case choiceCreate:
@@ -140,8 +200,8 @@ func (s homeScreen) View(width, height int) string {
 	b.WriteString(styles.Hint.Render(rule(width)))
 	b.WriteString("\n")
 
-	for c := range homeChoice(numChoices) {
-		b.WriteString(s.renderChoice(c))
+	for i, c := range s.choices {
+		b.WriteString(s.renderChoice(i, c))
 		b.WriteString("\n")
 	}
 
@@ -160,10 +220,10 @@ func (s homeScreen) View(width, height int) string {
 	return styles.Screen.Render(b.String())
 }
 
-func (s homeScreen) renderChoice(c homeChoice) string {
+func (s homeScreen) renderChoice(i int, c homeChoice) string {
 	cursor := "  "
 	label := styles.Item.Render(c.label())
-	if c == s.cursor {
+	if i == s.cursor {
 		cursor = styles.Selected.Render("▸ ")
 		label = styles.Selected.Render(c.label())
 	}
@@ -173,6 +233,10 @@ func (s homeScreen) renderChoice(c homeChoice) string {
 // choiceDetail is the dimmed parenthetical after each menu row.
 func (s homeScreen) choiceDetail(c homeChoice) string {
 	switch c {
+	case choiceContinue:
+		if s.cont != nil {
+			return "(" + s.cont.target.Label() + ")"
+		}
 	case choiceExisting:
 		running := countRunning(s.containers)
 		if running == 0 {
