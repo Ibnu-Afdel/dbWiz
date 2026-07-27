@@ -200,6 +200,16 @@ func NewDashboard(engine db.Engine, target db.Target, c docker.Container) Screen
 	return s
 }
 
+// Title labels the tab this dashboard lives in with the connected target's name
+// (a container name, or a SQLite file's base name). It satisfies screens.Titled.
+func (s dashboardScreen) Title() string { return s.container.Name }
+
+// Close releases the live engine. It satisfies screens.Closer so the root can
+// tear down a background target's connection when its whole tab is closed
+// without the dashboard ever handling Back. Closing the engine twice is
+// harmless, so this coexists with the Back path's own Close.
+func (s dashboardScreen) Close() error { return s.engine.Close() }
+
 // NewDashboardCreating is NewDashboard that opens straight into the
 // create-database form — the landing point for the home "Create new database"
 // route (Step 6.7).

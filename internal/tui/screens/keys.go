@@ -11,6 +11,12 @@ type KeyMap struct {
 	Quit key.Binding
 	Help key.Binding
 
+	// Tabs (v2 Phase 1) — multiple targets open at once. NextTab cycles; NewTab
+	// opens a fresh detection tab; CloseTab closes the active one.
+	NewTab   key.Binding
+	NextTab  key.Binding
+	CloseTab key.Binding
+
 	// Navigation shared across screens.
 	Up     key.Binding
 	Down   key.Binding
@@ -50,6 +56,21 @@ var Keys = KeyMap{
 	Help: key.NewBinding(
 		key.WithKeys("?"),
 		key.WithHelp("?", "help"),
+	),
+	// Tab keys use ctrl/alt modifiers so they never collide with a screen's own
+	// typing (the SQL editor, the SQLite path input). alt+1…9 jumps straight to a
+	// tab; ctrl+tab cycles for terminals that report it.
+	NewTab: key.NewBinding(
+		key.WithKeys("ctrl+t"),
+		key.WithHelp("^t", "new tab"),
+	),
+	NextTab: key.NewBinding(
+		key.WithKeys("ctrl+tab"),
+		key.WithHelp("^tab", "switch tab"),
+	),
+	CloseTab: key.NewBinding(
+		key.WithKeys("ctrl+w"),
+		key.WithHelp("^w", "close tab"),
 	),
 	Up: key.NewBinding(
 		key.WithKeys("up", "k"),

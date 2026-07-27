@@ -84,6 +84,12 @@ var (
 	PaneTitle        = lipgloss.NewStyle().Bold(true).Foreground(Muted)
 	PaneTitleFocused = lipgloss.NewStyle().Bold(true).Foreground(Accent)
 
+	// TabActive / TabInactive render the tab bar shown when more than one target
+	// is open (v2 Phase 1). The active tab reverses to Accent so the current
+	// target is unmistakable; inactive tabs sit muted alongside it.
+	TabActive   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(Accent)
+	TabInactive = lipgloss.NewStyle().Foreground(Muted)
+
 	// TableHeader marks the column-header row of the results grid; NullText marks
 	// a SQL NULL cell so it reads distinctly from an empty string. TableSelected
 	// highlights the cell under the results cursor (reverse video, so it stands out

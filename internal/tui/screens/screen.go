@@ -25,6 +25,21 @@ type Screen interface {
 	Help() []key.Binding
 }
 
+// Titled is implemented by screens that can label themselves — used by the root
+// to title a tab. A screen that returns "" (or does not implement this) gets a
+// generic tab label. The dashboard reports its connected target's name.
+type Titled interface {
+	Title() string
+}
+
+// Closer is implemented by screens that own a resource needing release — the
+// dashboard owns a live engine. The root calls Close when it discards a screen
+// that will never be returned to (closing a whole tab), so a background target's
+// connection is released even though its screen never handled Back itself.
+type Closer interface {
+	Close() error
+}
+
 // Navigation messages. A screen returns one of these (via a command) to move
 // around the stack; the root model is the only thing that acts on them.
 type (
