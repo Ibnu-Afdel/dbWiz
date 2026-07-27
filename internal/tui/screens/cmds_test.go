@@ -1,7 +1,6 @@
 package screens
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/Ibnu-Afdel/dbwiz/internal/db"
@@ -96,29 +95,5 @@ func TestLongestCommonPrefix(t *testing.T) {
 		if got := longestCommonPrefix(c.in); got != c.want {
 			t.Errorf("longestCommonPrefix(%v) = %q, want %q", c.in, got, c.want)
 		}
-	}
-}
-
-// TestRememberRecent verifies de-duplication, most-recent-first ordering, and
-// the cap on the session recents list.
-func TestRememberRecent(t *testing.T) {
-	sqliteRecents = nil
-	t.Cleanup(func() { sqliteRecents = nil })
-
-	rememberRecent("/a.db")
-	rememberRecent("/b.db")
-	rememberRecent("/a.db") // re-open moves it to front, no dupe
-	if len(sqliteRecents) != 2 {
-		t.Fatalf("want 2 recents, got %d: %v", len(sqliteRecents), sqliteRecents)
-	}
-	if sqliteRecents[0] != "/a.db" || sqliteRecents[1] != "/b.db" {
-		t.Errorf("ordering wrong: %v", sqliteRecents)
-	}
-
-	for i := range 20 {
-		rememberRecent(filepath.Join("/", string(rune('a'+i))+".db"))
-	}
-	if len(sqliteRecents) > 8 {
-		t.Errorf("recents not capped: %d", len(sqliteRecents))
 	}
 }

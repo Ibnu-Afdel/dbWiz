@@ -14,13 +14,9 @@ import (
 
 	"github.com/Ibnu-Afdel/dbwiz/internal/db"
 	"github.com/Ibnu-Afdel/dbwiz/internal/docker"
+	"github.com/Ibnu-Afdel/dbwiz/internal/state"
 	"github.com/Ibnu-Afdel/dbwiz/internal/tui/styles"
 )
-
-// sqliteRecents is the session-only list of files opened this run. It lives at
-// package scope because the screen is rebuilt each visit; v1 deliberately does
-// not persist it to disk (opt-in config arrives in v2).
-var sqliteRecents []string
 
 type (
 	// sqliteOpenedMsg carries a live SQLite engine after a successful open.
@@ -40,17 +36,20 @@ type (
 // error screen — a mistyped path is an expected event here.
 type sqliteOpenScreen struct {
 	input     textinput.Model
-	recentIdx int // -1 while editing the input; else an index into sqliteRecents
+	recents   []string // recently opened files, persisted across sessions (Step 1.3)
+	recentIdx int      // -1 while editing the input; else an index into recents
 	errMsg    string
 }
 
-// NewSQLiteOpen builds the path-input screen.
+// NewSQLiteOpen builds the path-input screen, seeding the recent-files list from
+// the persisted state cache so files opened in earlier sessions are one keypress
+// away (Step 1.3).
 func NewSQLiteOpen() Screen {
 	in := textinput.New()
 	in.Prompt = "Path: "
 	in.Placeholder = "~/project/dev.sqlite"
 	in.Focus()
-	return sqliteOpenScreen{input: in, recentIdx: -1}
+	return sqliteOpenScreen{input: in, recents: state.Load().RecentSQLite, recentIdx: -1}
 }
 
 func (s sqliteOpenScreen) Init() tea.Cmd { return textinput.Blink }
@@ -58,8 +57,7 @@ func (s sqliteOpenScreen) Init() tea.Cmd { return textinput.Blink }
 func (s sqliteOpenScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sqliteOpenedMsg:
-		rememberRecent(msg.path)
-		rememberSQLite(msg.path) // persist across sessions (v2 Step 1.2/1.3)
+		rememberSQLite(msg.path) // persist last + recent across sessions (Step 1.2/1.3)
 		return s, Push(NewDashboard(msg.engine, msg.target, docker.Container{
 			Name:   filepath.Base(msg.path),
 			Engine: docker.EngineUnknown,
@@ -107,7 +105,7 @@ func (s sqliteOpenScreen) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 // cycleRecent moves the highlight through the recent-files list and mirrors the
 // selection into the input so Enter opens it.
 func (s sqliteOpenScreen) cycleRecent(delta int) sqliteOpenScreen {
-	if len(sqliteRecents) == 0 {
+	if len(s.recents) == 0 {
 		return s
 	}
 	s.recentIdx += delta
@@ -115,10 +113,10 @@ func (s sqliteOpenScreen) cycleRecent(delta int) sqliteOpenScreen {
 	case s.recentIdx < 0:
 		s.recentIdx = -1
 		return s
-	case s.recentIdx >= len(sqliteRecents):
-		s.recentIdx = len(sqliteRecents) - 1
+	case s.recentIdx >= len(s.recents):
+		s.recentIdx = len(s.recents) - 1
 	}
-	s.input.SetValue(sqliteRecents[s.recentIdx])
+	s.input.SetValue(s.recents[s.recentIdx])
 	s.input.CursorEnd()
 	return s
 }
@@ -132,9 +130,9 @@ func (s sqliteOpenScreen) View(width, height int) string {
 	if s.errMsg != "" {
 		lines = append(lines, "", styles.DangerText.Render(s.errMsg))
 	}
-	if len(sqliteRecents) > 0 {
+	if len(s.recents) > 0 {
 		lines = append(lines, "", styles.Hint.Render("Recent:"))
-		for i, r := range sqliteRecents {
+		for i, r := range s.recents {
 			style := styles.Item
 			marker := "  "
 			if i == s.recentIdx {
@@ -174,21 +172,6 @@ func openSQLiteCmd(path string) tea.Cmd {
 		}
 		return sqliteOpenedMsg{engine: engine, target: target, path: expanded}
 	}
-}
-
-// rememberRecent prepends path to the session recents, de-duplicating and
-// capping the list so it stays a quick pick-list.
-func rememberRecent(path string) {
-	out := []string{path}
-	for _, r := range sqliteRecents {
-		if r != path {
-			out = append(out, r)
-		}
-	}
-	if len(out) > 8 {
-		out = out[:8]
-	}
-	sqliteRecents = out
 }
 
 // expandTilde replaces a leading ~ with the user's home directory.

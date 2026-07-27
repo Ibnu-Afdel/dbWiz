@@ -56,6 +56,28 @@ func TestHomeHidesContinueWhenTargetGone(t *testing.T) {
 	}
 }
 
+// TestSQLiteScreenShowsPersistedRecents verifies the SQLite open screen seeds
+// its recent-files list from the persisted state cache, so files opened in an
+// earlier session survive a restart (Step 1.3).
+func TestSQLiteScreenShowsPersistedRecents(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if err := state.AddRecentSQLite("/tmp/one.sqlite"); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.AddRecentSQLite("/tmp/two.sqlite"); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newModelWith(screens.NewSQLiteOpen())
+	m = pump(t, m, tea.WindowSizeMsg{Width: 90, Height: 30})
+	got := view(m)
+	for _, want := range []string{"Recent:", "/tmp/two.sqlite", "/tmp/one.sqlite"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("sqlite screen missing persisted recent %q:\n%s", want, got)
+		}
+	}
+}
+
 // TestHomeOffersContinueForSQLiteFile verifies a remembered SQLite file that
 // still exists is offered by its base name.
 func TestHomeOffersContinueForSQLiteFile(t *testing.T) {
