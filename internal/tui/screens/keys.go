@@ -84,6 +84,11 @@ type KeyMap struct {
 
 	// Backup opens the dump/restore screen for the selected database (v3 2.4).
 	Backup key.Binding
+
+	// YankURL copies a ready-to-paste connection URL for the selected database to
+	// the clipboard (v3 1.2). It shares 'y' with CopyCell but fires only on the
+	// databases pane, where no cell is selected, so the two never collide.
+	YankURL key.Binding
 }
 
 // Keys is the single instance every screen and the root model share.
@@ -262,5 +267,11 @@ var Keys = KeyMap{
 	Backup: key.NewBinding(
 		key.WithKeys("B"),
 		key.WithHelp("B", "dump/restore"),
+	),
+	// y on the databases pane yanks the connection URL (v3 1.2). Same key as
+	// CopyCell; the dashboard routes it by focus.
+	YankURL: key.NewBinding(
+		key.WithKeys("y"),
+		key.WithHelp("y", "yank url"),
 	),
 }

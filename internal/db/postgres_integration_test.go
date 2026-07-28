@@ -242,6 +242,54 @@ func TestPGQueryCancellation(t *testing.T) {
 	}
 }
 
+// TestPGExtensions covers v3 1.4: the available list reflects the image and
+// includes the always-present plpgsql, and CREATE EXTENSION installs a
+// contrib extension the stock image ships (uuid-ossp), which then reports as
+// installed. Re-running is a no-op (IF NOT EXISTS).
+func TestPGExtensions(t *testing.T) {
+	e := connectPG(t)
+	ctx := context.Background()
+
+	exts, err := e.ListExtensions(ctx, "")
+	if err != nil {
+		t.Fatalf("ListExtensions: %v", err)
+	}
+	if !hasExt(exts, "plpgsql") {
+		t.Fatalf("expected plpgsql to be available/installed; got %d extensions", len(exts))
+	}
+	if !hasExt(exts, "uuid-ossp") {
+		t.Skip("uuid-ossp not available in this image; skipping install check")
+	}
+
+	if err := e.CreateExtension(ctx, "", "uuid-ossp"); err != nil {
+		t.Fatalf("CreateExtension uuid-ossp: %v", err)
+	}
+	// Idempotent.
+	if err := e.CreateExtension(ctx, "", "uuid-ossp"); err != nil {
+		t.Fatalf("CreateExtension uuid-ossp (again): %v", err)
+	}
+	exts, err = e.ListExtensions(ctx, "")
+	if err != nil {
+		t.Fatalf("ListExtensions after create: %v", err)
+	}
+	for _, x := range exts {
+		if x.Name == "uuid-ossp" && !x.Installed() {
+			t.Errorf("uuid-ossp should report installed after CREATE EXTENSION")
+		}
+	}
+	// Clean up so the run is repeatable.
+	_, _ = e.Query(ctx, `DROP EXTENSION IF EXISTS "uuid-ossp"`)
+}
+
+func hasExt(exts []Extension, name string) bool {
+	for _, e := range exts {
+		if e.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func withDB(tgt Target, db string) Target { tgt.Database = db; return tgt }
 
 func hasDB(dbs []Database, name string) bool {

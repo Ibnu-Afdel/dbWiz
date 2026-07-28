@@ -28,7 +28,9 @@ const (
 	choiceExisting
 	choiceSaved
 	choiceCreate
+	choiceSetup
 	choiceSQLite
+	choiceDoctor
 	choiceRescan
 )
 
@@ -42,8 +44,12 @@ func (c homeChoice) label() string {
 		return "Connect to a saved target…"
 	case choiceCreate:
 		return "Create a new database…"
+	case choiceSetup:
+		return "Set up a new database server…"
 	case choiceSQLite:
 		return "Open a SQLite file…"
+	case choiceDoctor:
+		return "Run a health check…"
 	case choiceRescan:
 		return "Rescan containers"
 	}
@@ -98,7 +104,12 @@ func newHome(containers []docker.Container, cont *continueTarget) Screen {
 	if len(saved) > 0 {
 		choices = append(choices, choiceSaved)
 	}
-	choices = append(choices, choiceCreate, choiceSQLite, choiceRescan)
+	choices = append(choices, choiceCreate, choiceSetup, choiceSQLite)
+	// The doctor row appears only when there's a container to diagnose (v3 1.3).
+	if len(containers) > 0 {
+		choices = append(choices, choiceDoctor)
+	}
+	choices = append(choices, choiceRescan)
 	return homeScreen{containers: containers, cont: cont, saved: saved, choices: choices, spinner: sp}
 }
 
@@ -188,8 +199,12 @@ func (s homeScreen) choose() (Screen, tea.Cmd) {
 		return s, savedRoute(s.saved)
 	case choiceCreate:
 		return s, createRoute(s.containers)
+	case choiceSetup:
+		return s, Push(NewSetup(s.containers))
 	case choiceSQLite:
 		return s, Push(NewSQLiteOpen())
+	case choiceDoctor:
+		return s, doctorRoute(s.containers)
 	case choiceRescan:
 		return s, Replace(NewDetect())
 	}
@@ -261,8 +276,12 @@ func (s homeScreen) choiceDetail(c homeChoice) string {
 		return fmt.Sprintf("(%d saved)", len(s.saved))
 	case choiceCreate:
 		return "(create + connect in one flow)"
+	case choiceSetup:
+		return "(pull + run a container, Omarchy-style)"
 	case choiceSQLite:
 		return "(path input / recent)"
+	case choiceDoctor:
+		return "(daemon · port · auth · query)"
 	case choiceRescan:
 		return "(r)"
 	}
@@ -344,6 +363,45 @@ func createRoute(containers []docker.Container) tea.Cmd {
 	default:
 		return Push(NewPickerCreating(running))
 	}
+}
+
+// doctorRoute picks which container the health check runs against: the pinned
+// last-used one if it's in this scan, otherwise the first running container,
+// otherwise the first detected (the doctor works on a stopped one too — reporting
+// that is the point). With nothing detected it's a friendly error.
+func doctorRoute(containers []docker.Container) tea.Cmd {
+	c, ok := primaryContainer(containers)
+	if !ok {
+		return Push(NewErrorFromDocker(&docker.DockerError{
+			Kind:   docker.DockerErrNoContainers,
+			Title:  "Nothing to check",
+			Detail: "No database container was detected, so there's nothing to run a health check against.",
+			Hint:   "press [b] to go back, or set up a server first",
+		}, retrySpec{}))
+	}
+	return Push(NewDoctor(c))
+}
+
+// primaryContainer chooses the most likely target of a whole-inventory action:
+// the pinned last-used container if present, else the first running one, else the
+// first detected.
+func primaryContainer(cs []docker.Container) (docker.Container, bool) {
+	if len(cs) == 0 {
+		return docker.Container{}, false
+	}
+	if last := state.Load().Last; last != nil && last.Kind == state.KindDocker {
+		for _, c := range cs {
+			if c.Name == last.Container {
+				return c, true
+			}
+		}
+	}
+	for _, c := range cs {
+		if c.State == docker.StateRunning {
+			return c, true
+		}
+	}
+	return cs[0], true
 }
 
 // --- small helpers over the container slice ---

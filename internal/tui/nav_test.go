@@ -74,7 +74,9 @@ func TestHomeNavigatesToSQLiteAndBack(t *testing.T) {
 		t.Errorf("help bar missing home bindings:\n%s", got)
 	}
 
-	// Down twice to "Open a SQLite file…" then select it (a push).
+	// Down to "Open a SQLite file…" (Existing → Create → Set up → SQLite) then
+	// select it (a push).
+	m = pump(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	m = pump(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	m = pump(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	m = pump(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})

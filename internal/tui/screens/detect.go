@@ -56,9 +56,11 @@ func (s detectScreen) View(width, height int) string {
 func (s detectScreen) Help() []key.Binding { return nil }
 
 // emptyStateError is the no-containers screen: the plain-language empty state
-// plus a rescan retry and an [o] escape hatch to open a SQLite file, so a user
-// without any Docker databases is never dead-ended.
+// plus a rescan retry, an [o] escape hatch to open a SQLite file, and an [s]
+// route to provision a new server (v3 1.1) — so a user with no Docker databases
+// yet can create one right here rather than dead-ending.
 func emptyStateError() Screen {
 	return NewErrorFromDocker(docker.ErrNoContainers(), retryRescan).(errorScreen).
-		withAlt(altSpec{key: "o", label: "open a SQLite file", cmd: Push(NewSQLiteOpen())})
+		withAlt(altSpec{key: "o", label: "open a SQLite file", cmd: Push(NewSQLiteOpen())}).
+		withAlt(altSpec{key: "s", label: "set up a server", cmd: Push(NewSetup(nil))})
 }

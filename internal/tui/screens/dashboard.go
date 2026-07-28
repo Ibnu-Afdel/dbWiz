@@ -519,6 +519,8 @@ func (s dashboardScreen) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s.openSaveQuery()
 	case key.Matches(msg, Keys.Export):
 		return s.openExport()
+	case key.Matches(msg, Keys.YankURL) && s.focus == focusDatabases:
+		return s.yankURL()
 	case key.Matches(msg, Keys.CopyCell):
 		return s.copyCell()
 	case key.Matches(msg, Keys.CopyRow):
@@ -777,7 +779,7 @@ func (s dashboardScreen) Help() []key.Binding {
 	b := []key.Binding{Keys.Focus, Keys.Up, Keys.Down}
 	switch s.focus {
 	case focusDatabases:
-		b = append(b, Keys.Select, Keys.Create, Keys.Delete, Keys.Backup)
+		b = append(b, Keys.Select, Keys.Create, Keys.Delete, Keys.Backup, Keys.YankURL)
 	case focusTables:
 		b = append(b, Keys.Select, Keys.Info, Keys.InsertRow, Keys.Filter, Keys.RowCount, Keys.Truncate)
 	case focusUsers:

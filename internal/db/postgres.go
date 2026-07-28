@@ -29,8 +29,12 @@ type Postgres struct {
 // NewPostgres returns an unconnected Postgres engine.
 func NewPostgres() *Postgres { return &Postgres{} }
 
-// compile-time interface check.
-var _ Engine = (*Postgres)(nil)
+// compile-time interface checks. Postgres also satisfies Extensioner (v3 1.4);
+// MySQL and SQLite deliberately do not.
+var (
+	_ Engine      = (*Postgres)(nil)
+	_ Extensioner = (*Postgres)(nil)
+)
 
 func (p *Postgres) Kind() Kind { return KindPostgres }
 
@@ -478,4 +482,52 @@ func (p *Postgres) ExecMutation(ctx context.Context, database, sql string) (Resu
 		return Result{}, classifyPostgres(err)
 	}
 	return res, nil
+}
+
+// ListExtensions reports every extension the running image makes available in
+// database, each with its installed version if any (v3 1.4). It reads
+// pg_available_extensions, so the list is exactly what this image can install —
+// postgis shows up only on a PostGIS image. Extensions are per-database, so it
+// reconnects to database first, like the browse methods.
+func (p *Postgres) ListExtensions(ctx context.Context, database string) ([]Extension, error) {
+	if err := p.ensureDB(ctx, database); err != nil {
+		return nil, err
+	}
+	const q = `SELECT name, default_version,
+	                  COALESCE(installed_version, ''),
+	                  COALESCE(comment, '')
+	           FROM pg_available_extensions
+	           ORDER BY name`
+	rows, err := p.pool.QueryContext(ctx, q)
+	if err != nil {
+		return nil, classifyPostgres(err)
+	}
+	defer rows.Close()
+	var out []Extension
+	for rows.Next() {
+		var e Extension
+		if err := rows.Scan(&e.Name, &e.DefaultVersion, &e.InstalledVersion, &e.Comment); err != nil {
+			return nil, classifyPostgres(err)
+		}
+		out = append(out, e)
+	}
+	return out, p.wrap(rows.Err())
+}
+
+// CreateExtension installs name in database with CREATE EXTENSION IF NOT EXISTS,
+// so re-running is a no-op. The name is validated and quoted like any other
+// identifier. If the image doesn't ship the extension the server rejects it (a
+// missing control file), which classifies to a plain DBError the caller shows.
+func (p *Postgres) CreateExtension(ctx context.Context, database, name string) error {
+	if err := p.ensureDB(ctx, database); err != nil {
+		return err
+	}
+	if err := validateIdent(name); err != nil {
+		return err
+	}
+	stmt := "CREATE EXTENSION IF NOT EXISTS " + quotePGIdent(name)
+	if _, err := p.pool.ExecContext(ctx, stmt); err != nil {
+		return classifyPostgres(err)
+	}
+	return nil
 }

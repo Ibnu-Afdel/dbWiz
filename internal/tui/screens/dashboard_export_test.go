@@ -152,15 +152,34 @@ func TestCopyRowYanksTabSeparated(t *testing.T) {
 	}
 }
 
-// TestCopyIgnoredOutsideResults covers 2.3's guard: y/Y do nothing when the
-// results pane isn't focused, so the bare letters stay harmless elsewhere.
+// TestCopyIgnoredOutsideResults covers 2.3's guard: y/Y do nothing on a browse
+// pane that isn't results or databases, so the bare letters stay harmless there.
+// (On the databases pane y yanks a connection URL — see TestYankURLOnDatabases.)
 func TestCopyIgnoredOutsideResults(t *testing.T) {
-	s, _ := newPGDashboard(t) // starts on a browse pane (databases)
+	s, _ := newPGDashboard(t)
 	s = feed(s, queryDoneMsg{seq: s.querySeq, verb: "SELECT", result: db.Result{Columns: []string{"id"}, Rows: [][]any{{int64(1)}}}})
-	// focus is NOT results here.
+	s.focus = focusTables // neither results nor databases
 	_, cmd := press(s, tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd != nil {
-		t.Errorf("y off the results pane should be a no-op")
+		t.Errorf("y off the results/databases panes should be a no-op")
+	}
+}
+
+// TestYankURLOnDatabases covers v3 1.2: y on the databases pane copies a
+// ready-to-paste connection URL for the highlighted database to the clipboard.
+func TestYankURLOnDatabases(t *testing.T) {
+	s, _ := newPGDashboard(t)
+	s.focus = focusDatabases
+	s.databases = []db.Database{{Name: "shop"}}
+	s.dbCursor = 0
+	s.target = db.Target{Host: "127.0.0.1", Port: 5432, User: "postgres", Database: "postgres"}
+
+	s2, cmd := press(s, tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if cmd == nil || !isClipboard(cmd(), "postgresql://postgres@127.0.0.1:5432/shop") {
+		t.Errorf("y on the databases pane should yank the selected database's URL")
+	}
+	if !strings.Contains(s2.notice, "Copied connection URL") {
+		t.Errorf("expected a copy toast, got %q", s2.notice)
 	}
 }
 

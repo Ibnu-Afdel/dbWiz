@@ -44,16 +44,17 @@ type errorScreen struct {
 	hint   string
 	info   string // wrapped underlying error, revealed with [i]
 	retry  retrySpec
-	alt    altSpec // optional secondary action (zero = none)
+	alts   []altSpec // optional secondary actions (empty = none)
 
 	showInfo bool
 }
 
 // withAlt attaches an optional secondary action to an error screen (e.g. the
-// SQLite escape hatch on the empty state). Kept as a builder so the shared
-// constructors stay two-argument.
+// SQLite escape hatch on the empty state). It appends, so a screen can offer more
+// than one — the no-containers state offers both "open a SQLite file" and "set up
+// a server". Kept as a builder so the shared constructors stay two-argument.
 func (s errorScreen) withAlt(a altSpec) errorScreen {
-	s.alt = a
+	s.alts = append(s.alts, a)
 	return s
 }
 
@@ -100,8 +101,10 @@ func (s errorScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			s.showInfo = !s.showInfo
 		}
 	default:
-		if s.alt.cmd != nil && key.String() == s.alt.key {
-			return s, s.alt.cmd
+		for _, a := range s.alts {
+			if a.cmd != nil && key.String() == a.key {
+				return s, a.cmd
+			}
 		}
 	}
 	return s, nil
@@ -134,11 +137,13 @@ func (s errorScreen) Help() []key.Binding {
 	if s.info != "" {
 		b = append(b, Keys.Info)
 	}
-	if s.alt.cmd != nil {
-		b = append(b, key.NewBinding(
-			key.WithKeys(s.alt.key),
-			key.WithHelp(s.alt.key, s.alt.label),
-		))
+	for _, a := range s.alts {
+		if a.cmd != nil {
+			b = append(b, key.NewBinding(
+				key.WithKeys(a.key),
+				key.WithHelp(a.key, a.label),
+			))
+		}
 	}
 	return b
 }

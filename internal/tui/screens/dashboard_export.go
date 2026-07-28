@@ -11,6 +11,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/Ibnu-Afdel/dbwiz/internal/dburl"
 	"github.com/Ibnu-Afdel/dbwiz/internal/export"
 	"github.com/Ibnu-Afdel/dbwiz/internal/tui/styles"
 )
@@ -206,6 +207,20 @@ func (s dashboardScreen) copyCell() (dashboardScreen, tea.Cmd) {
 	}
 	s.notice, s.noticeErr = "Copied cell to clipboard.", false
 	return s, tea.SetClipboard(cellText(val))
+}
+
+// yankURL copies a ready-to-paste connection URL for the selected database to
+// the clipboard (v3 1.2). It builds the URL from the live target's credentials
+// (the credential ladder already ran), swapping in the highlighted database, so
+// the yanked string connects straight to that database. OSC 52 means it works
+// over SSH too.
+func (s dashboardScreen) yankURL() (dashboardScreen, tea.Cmd) {
+	target := s.target
+	if s.dbCursor < len(s.databases) {
+		target.Database = s.databases[s.dbCursor].Name
+	}
+	s.notice, s.noticeErr = "Copied connection URL to clipboard.", false
+	return s, tea.SetClipboard(dburl.URL(s.engine.Kind(), target))
 }
 
 // copyRow yanks the whole selected row to the clipboard, tab-separated so it
