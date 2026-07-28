@@ -95,6 +95,26 @@ func TestBuildInsert(t *testing.T) {
 	}
 }
 
+// TestBuildTruncate uses TRUNCATE on server engines and DELETE on SQLite.
+func TestBuildTruncate(t *testing.T) {
+	if got := BuildTruncate(KindPostgres, "", "logs"); got != `TRUNCATE TABLE "logs"` {
+		t.Errorf("postgres: %s", got)
+	}
+	if got := BuildTruncate(KindSQLite, "", "logs"); got != `DELETE FROM "logs"` {
+		t.Errorf("sqlite: %s", got)
+	}
+}
+
+// TestBuildSelect appends a raw WHERE and a LIMIT when given.
+func TestBuildSelect(t *testing.T) {
+	if got := BuildSelect(KindPostgres, "", "t", "status = 'open'", 50); got != `SELECT * FROM "t" WHERE status = 'open' LIMIT 50` {
+		t.Errorf("filtered: %s", got)
+	}
+	if got := BuildSelect(KindPostgres, "", "t", "   ", 0); got != `SELECT * FROM "t"` {
+		t.Errorf("blank where / no limit: %s", got)
+	}
+}
+
 // TestBuildUpdateQuotesInjection: a value with a quote is escaped, not breaking out.
 func TestBuildUpdateQuotesInjection(t *testing.T) {
 	sql, err := BuildUpdate(KindPostgres, "", "t", []string{"id"}, []any{"1"}, "name", strptr("O'Brien'; DROP TABLE t;--"))

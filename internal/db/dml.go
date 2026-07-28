@@ -68,6 +68,38 @@ func BuildInsert(kind Kind, database, table string, cols []string, vals []*strin
 		q.table(database, table), strings.Join(idents, ", "), strings.Join(lits, ", ")), nil
 }
 
+// BuildTruncate empties a table (v3 2.3). Postgres and MySQL use TRUNCATE; SQLite
+// has no TRUNCATE, so an unqualified DELETE (which SQLite optimises into a fast
+// whole-table drop) stands in.
+func BuildTruncate(kind Kind, database, table string) string {
+	q := quoterFor(kind)
+	if kind == KindSQLite {
+		return "DELETE FROM " + q.table(database, table)
+	}
+	return "TRUNCATE TABLE " + q.table(database, table)
+}
+
+// BuildCount builds an exact row count for a table (v3 2.3), naming the result
+// column "count" so the caller can read it back by position regardless of engine.
+func BuildCount(kind Kind, database, table string) string {
+	return "SELECT COUNT(*) AS count FROM " + quoterFor(kind).table(database, table)
+}
+
+// BuildSelect builds the browser's row query with an optional raw WHERE filter
+// (v3 2.3). The table is quoted; the WHERE fragment is the user's own SQL, passed
+// through verbatim (the same trust model as the query editor — it's their
+// database). A non-positive limit omits the LIMIT clause.
+func BuildSelect(kind Kind, database, table, where string, limit int) string {
+	sql := "SELECT * FROM " + quoterFor(kind).table(database, table)
+	if strings.TrimSpace(where) != "" {
+		sql += " WHERE " + where
+	}
+	if limit > 0 {
+		sql += fmt.Sprintf(" LIMIT %d", limit)
+	}
+	return sql
+}
+
 // quoter renders identifiers, literals, and qualified table names for one engine
 // family, reusing the same quoting the drivers use elsewhere so a generated
 // statement is quoted identically to a hand-built one.

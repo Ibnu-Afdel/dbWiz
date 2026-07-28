@@ -21,11 +21,11 @@ func TestDeleteRowFlow(t *testing.T) {
 		t.Fatalf("want deletePrepMsg, got %T", msg)
 	}
 	s = feed(s, prep)
-	if s.mode != modeDeleteRow {
+	if s.mode != modeConfirmSQL {
 		t.Fatalf("delete confirm should open, mode=%d", s.mode)
 	}
-	if s.deleteRow.sql != `DELETE FROM "t" WHERE "id" = '1'` {
-		t.Fatalf("generated DELETE: %s", s.deleteRow.sql)
+	if s.confirmSQL.sql != `DELETE FROM "t" WHERE "id" = '1'` {
+		t.Fatalf("generated DELETE: %s", s.confirmSQL.sql)
 	}
 	if !strings.Contains(s.View(120, 40), `DELETE FROM "t"`) {
 		t.Error("the DELETE should be shown before it runs")
@@ -35,7 +35,7 @@ func TestDeleteRowFlow(t *testing.T) {
 	if s2.mode != modeBrowse || !s2.working {
 		t.Fatalf("enter should run and return to browse; mode=%d working=%v", s2.mode, s2.working)
 	}
-	runCmd(t, execMutationCmd(eng, "postgres", s.deleteRow.sql, "note"))
+	runCmd(t, execMutationCmd(eng, "postgres", s.confirmSQL.sql, "note"))
 	if eng.lastMutationSQL != `DELETE FROM "t" WHERE "id" = '1'` {
 		t.Errorf("executed SQL: %s", eng.lastMutationSQL)
 	}
@@ -48,7 +48,7 @@ func TestDeleteRowNoPrimaryKeyRefuses(t *testing.T) {
 
 	s, cmd := press(s, tea.KeyPressMsg{Code: 'x', Text: "x"})
 	s = feed(s, runCmd(t, cmd))
-	if s.mode == modeDeleteRow {
+	if s.mode == modeConfirmSQL {
 		t.Fatal("delete must not proceed without a primary key")
 	}
 	if !s.noticeErr || !strings.Contains(s.notice, "no primary key") {

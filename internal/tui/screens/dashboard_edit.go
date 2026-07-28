@@ -196,7 +196,7 @@ func (s dashboardScreen) applyMutationDone(msg mutationDoneMsg) (dashboardScreen
 	s.notice, s.noticeErr = notice, false
 	if s.resultsTable != "" && s.results == resultsRows {
 		s.resLoading, s.resErr = true, nil
-		return s, tea.Batch(s.spinner.Tick, previewRowsCmd(s.engine, s.currentDB, s.resultsTable))
+		return s, tea.Batch(s.spinner.Tick, s.previewCmd(s.resultsTable))
 	}
 	return s, nil
 }

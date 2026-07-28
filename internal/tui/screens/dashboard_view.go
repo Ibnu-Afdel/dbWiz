@@ -182,10 +182,12 @@ func (s dashboardScreen) renderOverlay(width, height int) string {
 		return s.renderCellOverlay(width, height)
 	case modeEditCell:
 		body = s.cellEditView(width)
-	case modeDeleteRow:
-		body = s.deleteRowView(width)
+	case modeConfirmSQL:
+		body = s.confirmSQLView(width)
 	case modeInsertRow:
 		body = s.insertRowView(width)
+	case modeFilter:
+		body = s.filterView(width)
 	}
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, body)
 }

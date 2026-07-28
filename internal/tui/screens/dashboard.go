@@ -36,18 +36,19 @@ const (
 type adminMode int
 
 const (
-	modeBrowse    adminMode = iota // the three-pane browser
-	modeForm                       // a create form (database or user)
-	modeConfirm                    // a type-the-name destructive confirm
-	modeGrant                      // the grant/revoke picker
-	modeCell                       // the results cell-detail overlay (full value)
-	modeHistory                    // the searchable per-target query-history picker (v2 2.1)
-	modeSaved                      // the searchable saved/favourite-query picker (v2 2.2)
-	modeExport                     // the CSV/JSON results-export chooser (v2 2.3)
-	modeComplete                   // the schema-aware autocomplete picker (v2 2.5)
-	modeEditCell                   // the results cell editor that generates an UPDATE (v3 2.1)
-	modeDeleteRow                  // the delete-this-row confirm showing the DELETE (v3 2.2)
-	modeInsertRow                  // the generated insert form (v3 2.2)
+	modeBrowse     adminMode = iota // the three-pane browser
+	modeForm                        // a create form (database or user)
+	modeConfirm                     // a type-the-name destructive confirm
+	modeGrant                       // the grant/revoke picker
+	modeCell                        // the results cell-detail overlay (full value)
+	modeHistory                     // the searchable per-target query-history picker (v2 2.1)
+	modeSaved                       // the searchable saved/favourite-query picker (v2 2.2)
+	modeExport                      // the CSV/JSON results-export chooser (v2 2.3)
+	modeComplete                    // the schema-aware autocomplete picker (v2 2.5)
+	modeEditCell                    // the results cell editor that generates an UPDATE (v3 2.1)
+	modeConfirmSQL                  // a generic "run this statement?" confirm — delete row, truncate (v3 2.2/2.3)
+	modeInsertRow                   // the generated insert form (v3 2.2)
+	modeFilter                      // the quick WHERE-filter input over a preview (v3 2.3)
 )
 
 // formPurpose records which create command a submitted form should run.
@@ -184,10 +185,17 @@ type dashboardScreen struct {
 	// cellEdit backs the results cell editor (v3 2.1): the value input plus the
 	// row identity (primary-key columns/values) needed to generate a safe UPDATE.
 	cellEdit cellEditState
-	// deleteRow / insertRow back the row delete-confirm and the generated insert
-	// form (v3 2.2).
-	deleteRow deleteRowState
-	insertRow insertRowState
+	// confirmSQL backs the generic "run this statement?" confirm (delete row,
+	// truncate); insertRow backs the generated insert form; filter backs the quick
+	// WHERE bar over a preview (v3 2.2/2.3).
+	confirmSQL confirmSQLState
+	insertRow  insertRowState
+	filter     filterState
+	// activeFilter is the WHERE condition currently applied to activeFilterTable's
+	// preview (empty when none); it re-applies on refresh and shows in the results
+	// title (v3 2.3).
+	activeFilter      string
+	activeFilterTable string
 
 	// columnCache maps a table name to its column names, warmed as the user
 	// previews or describes tables. It's the "cached metadata" the editor's
@@ -264,7 +272,7 @@ func (s dashboardScreen) Title() string { return s.container.Name }
 // satisfies screens.TextInputer.
 func (s dashboardScreen) CapturesText() bool {
 	if s.mode == modeForm || s.mode == modeConfirm || s.mode == modeEditCell ||
-		s.mode == modeInsertRow || s.mode == modeDeleteRow {
+		s.mode == modeInsertRow || s.mode == modeConfirmSQL || s.mode == modeFilter {
 		return true
 	}
 	if s.mode == modeHistory {
@@ -407,6 +415,14 @@ func (s dashboardScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		return s.openInsertRow(msg)
 	case mutationDoneMsg:
 		return s.applyMutationDone(msg)
+	case countMsg:
+		s.working = false
+		if msg.err != nil {
+			s.notice, s.noticeErr = "Count failed: "+msg.err.Detail, true
+			return s, nil
+		}
+		s.notice, s.noticeErr = fmt.Sprintf("%s has %d row(s)", msg.table, msg.n), false
+		return s, nil
 
 	case grantsLoadedMsg:
 		// Only apply if the matrix is still open on the same user+database.
@@ -507,6 +523,12 @@ func (s dashboardScreen) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s.startInsertRow()
 	case key.Matches(msg, Keys.DeleteRow):
 		return s.startDeleteRow()
+	case key.Matches(msg, Keys.Truncate):
+		return s.startTruncate()
+	case key.Matches(msg, Keys.RowCount):
+		return s.startCount()
+	case key.Matches(msg, Keys.Filter):
+		return s.startFilter()
 	case key.Matches(msg, Keys.Focus):
 		s.focus = s.nextFocus()
 		return s, s.syncEditorFocus()
@@ -617,6 +639,7 @@ func (s dashboardScreen) selectFocused() (dashboardScreen, tea.Cmd) {
 			return s, nil
 		}
 		s.resultsTable, s.resErr, s.resLoading = t.Name, nil, true
+		s.activeFilter, s.activeFilterTable = "", "" // a fresh table starts unfiltered
 		s.focus = focusResults
 		return s, tea.Batch(s.spinner.Tick, previewRowsCmd(s.engine, s.currentDB, t.Name))
 	case focusResults:
@@ -655,7 +678,7 @@ func (s dashboardScreen) refresh() (dashboardScreen, tea.Cmd) {
 		if s.results == resultsDescribe {
 			return s, tea.Batch(s.spinner.Tick, describeTableCmd(s.engine, s.currentDB, s.resultsTable))
 		}
-		return s, tea.Batch(s.spinner.Tick, previewRowsCmd(s.engine, s.currentDB, s.resultsTable))
+		return s, tea.Batch(s.spinner.Tick, s.previewCmd(s.resultsTable))
 	default: // tables (and the editor placeholder) refresh the table list
 		s.tblLoading, s.tblErr = true, nil
 		return s, tea.Batch(s.spinner.Tick, loadTablesCmd(s.engine, s.currentDB))
@@ -710,9 +733,14 @@ func (s dashboardScreen) Help() []key.Binding {
 			key.NewBinding(key.WithKeys("alt+n"), key.WithHelp("⌥n", "toggle NULL")),
 			Keys.Back,
 		}
-	case modeDeleteRow:
+	case modeConfirmSQL:
 		return []key.Binding{
-			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "delete")),
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm")),
+			Keys.Back,
+		}
+	case modeFilter:
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "apply")),
 			Keys.Back,
 		}
 	case modeInsertRow:
@@ -737,14 +765,14 @@ func (s dashboardScreen) Help() []key.Binding {
 	case focusDatabases:
 		b = append(b, Keys.Select, Keys.Create, Keys.Delete)
 	case focusTables:
-		b = append(b, Keys.Select, Keys.Info, Keys.InsertRow)
+		b = append(b, Keys.Select, Keys.Info, Keys.InsertRow, Keys.Filter, Keys.RowCount, Keys.Truncate)
 	case focusUsers:
 		b = append(b, Keys.Create, Keys.Delete, Keys.Grant, Keys.EditUser)
 	case focusResults:
 		b = append(b,
 			key.NewBinding(key.WithKeys("left", "right"), key.WithHelp("←/→", "columns")),
 			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "inspect cell")),
-			Keys.EditCell, Keys.InsertRow, Keys.DeleteRow, Keys.CopyCell, Keys.CopyRow, Keys.Export,
+			Keys.EditCell, Keys.InsertRow, Keys.DeleteRow, Keys.Filter, Keys.CopyCell, Keys.CopyRow, Keys.Export,
 		)
 	}
 	b = append(b, Keys.Edit, Keys.HistoryList, Keys.SavedList, Keys.Refresh, Keys.Back)

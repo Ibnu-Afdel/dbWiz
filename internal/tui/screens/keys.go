@@ -75,6 +75,12 @@ type KeyMap struct {
 	// safe because they fire only in the browse panes.
 	InsertRow key.Binding
 	DeleteRow key.Binding
+
+	// Table-level actions (v3 2.3): Truncate empties the table (confirm), RowCount
+	// runs an exact COUNT(*), Filter opens a quick WHERE bar over the preview.
+	Truncate key.Binding
+	RowCount key.Binding
+	Filter   key.Binding
 }
 
 // Keys is the single instance every screen and the root model share.
@@ -235,5 +241,18 @@ var Keys = KeyMap{
 	DeleteRow: key.NewBinding(
 		key.WithKeys("x"),
 		key.WithHelp("x", "delete row"),
+	),
+	// T truncates, # counts, / filters — table-level actions in the browse panes.
+	Truncate: key.NewBinding(
+		key.WithKeys("T"),
+		key.WithHelp("T", "truncate"),
+	),
+	RowCount: key.NewBinding(
+		key.WithKeys("#"),
+		key.WithHelp("#", "row count"),
+	),
+	Filter: key.NewBinding(
+		key.WithKeys("/"),
+		key.WithHelp("/", "filter"),
 	),
 }
