@@ -188,6 +188,8 @@ func (s dashboardScreen) renderOverlay(width, height int) string {
 		body = s.insertRowView(width)
 	case modeFilter:
 		body = s.filterView(width)
+	case modeBackup:
+		body = s.backupView(width)
 	}
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, body)
 }

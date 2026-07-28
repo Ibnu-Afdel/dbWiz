@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Ibnu-Afdel/dbwiz/internal/backup"
 	"github.com/Ibnu-Afdel/dbwiz/internal/db"
 	"github.com/Ibnu-Afdel/dbwiz/internal/docker"
 )
@@ -150,50 +151,30 @@ type execSpec struct {
 	env  []string
 }
 
-// dumpSpec builds the pg_dump/mysqldump invocation for a target. SQLite has no
-// container to exec into, so it's an explicit, friendly error rather than a
-// confusing empty-container failure.
+// dumpSpec builds the pg_dump/mysqldump invocation for a target via the shared
+// backup package. SQLite has no container to exec into, so validBackupDB rejects
+// it first with a friendlier message than the package's ErrUnsupported.
 func dumpSpec(t cliTarget, dbname, password string) (execSpec, error) {
 	if err := validBackupDB(t, dbname); err != nil {
 		return execSpec{}, err
 	}
-	switch t.kind {
-	case db.KindPostgres:
-		return execSpec{
-			args: []string{"pg_dump", "-U", t.target.User, dbname},
-			env:  pgEnv(password),
-		}, nil
-	case db.KindMySQL, db.KindMariaDB:
-		return execSpec{
-			args: []string{"mysqldump", "-u", t.target.User, dbname},
-			env:  mysqlEnv(password),
-		}, nil
-	default:
-		return execSpec{}, errNoContainerBackup
+	c, err := backup.Dump(t.kind, t.target.User, dbname, password)
+	if err != nil {
+		return execSpec{}, err
 	}
+	return execSpec{args: c.Args, env: c.Env}, nil
 }
 
-// restoreSpec builds the psql/mysql invocation that reads a dump from stdin. For
-// Postgres, ON_ERROR_STOP makes a mid-restore failure fail the command rather
-// than press on silently.
+// restoreSpec builds the psql/mysql invocation that reads a dump from stdin.
 func restoreSpec(t cliTarget, dbname, password string) (execSpec, error) {
 	if err := validBackupDB(t, dbname); err != nil {
 		return execSpec{}, err
 	}
-	switch t.kind {
-	case db.KindPostgres:
-		return execSpec{
-			args: []string{"psql", "-U", t.target.User, "-d", dbname, "-v", "ON_ERROR_STOP=1"},
-			env:  pgEnv(password),
-		}, nil
-	case db.KindMySQL, db.KindMariaDB:
-		return execSpec{
-			args: []string{"mysql", "-u", t.target.User, dbname},
-			env:  mysqlEnv(password),
-		}, nil
-	default:
-		return execSpec{}, errNoContainerBackup
+	c, err := backup.Restore(t.kind, t.target.User, dbname, password)
+	if err != nil {
+		return execSpec{}, err
 	}
+	return execSpec{args: c.Args, env: c.Env}, nil
 }
 
 // errNoContainerBackup explains why dump/restore don't apply to SQLite.
@@ -214,25 +195,6 @@ func validBackupDB(t cliTarget, dbname string) error {
 		return fmt.Errorf("database name %q can't start with a dash", dbname)
 	}
 	return nil
-}
-
-// pgEnv forwards a Postgres password via PGPASSWORD, the variable pg_dump/psql
-// read. An empty password forwards nothing (the container may trust local
-// connections).
-func pgEnv(password string) []string {
-	if password == "" {
-		return nil
-	}
-	return []string{"PGPASSWORD=" + password}
-}
-
-// mysqlEnv forwards a MySQL password via MYSQL_PWD, the variable
-// mysqldump/mysql read, avoiding the insecure `-p<pass>` on the command line.
-func mysqlEnv(password string) []string {
-	if password == "" {
-		return nil
-	}
-	return []string{"MYSQL_PWD=" + password}
 }
 
 // passwordFor resolves the effective password with the same precedence open()

@@ -194,6 +194,8 @@ func (s dashboardScreen) handleOverlayKey(msg tea.KeyPressMsg) (dashboardScreen,
 		return s.updateInsertRow(msg)
 	case modeFilter:
 		return s.updateFilter(msg)
+	case modeBackup:
+		return s.updateBackup(msg)
 	case modeSaved:
 		var res savedResult
 		var cmd tea.Cmd

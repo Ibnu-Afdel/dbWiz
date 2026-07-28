@@ -81,6 +81,9 @@ type KeyMap struct {
 	Truncate key.Binding
 	RowCount key.Binding
 	Filter   key.Binding
+
+	// Backup opens the dump/restore screen for the selected database (v3 2.4).
+	Backup key.Binding
 }
 
 // Keys is the single instance every screen and the root model share.
@@ -254,5 +257,10 @@ var Keys = KeyMap{
 	Filter: key.NewBinding(
 		key.WithKeys("/"),
 		key.WithHelp("/", "filter"),
+	),
+	// B opens dump/restore for the selected database.
+	Backup: key.NewBinding(
+		key.WithKeys("B"),
+		key.WithHelp("B", "dump/restore"),
 	),
 }

@@ -49,6 +49,7 @@ const (
 	modeConfirmSQL                  // a generic "run this statement?" confirm — delete row, truncate (v3 2.2/2.3)
 	modeInsertRow                   // the generated insert form (v3 2.2)
 	modeFilter                      // the quick WHERE-filter input over a preview (v3 2.3)
+	modeBackup                      // the dump/restore screen (v3 2.4)
 )
 
 // formPurpose records which create command a submitted form should run.
@@ -196,6 +197,8 @@ type dashboardScreen struct {
 	// title (v3 2.3).
 	activeFilter      string
 	activeFilterTable string
+	// backup backs the dump/restore screen (v3 2.4).
+	backup backupState
 
 	// columnCache maps a table name to its column names, warmed as the user
 	// previews or describes tables. It's the "cached metadata" the editor's
@@ -272,7 +275,8 @@ func (s dashboardScreen) Title() string { return s.container.Name }
 // satisfies screens.TextInputer.
 func (s dashboardScreen) CapturesText() bool {
 	if s.mode == modeForm || s.mode == modeConfirm || s.mode == modeEditCell ||
-		s.mode == modeInsertRow || s.mode == modeConfirmSQL || s.mode == modeFilter {
+		s.mode == modeInsertRow || s.mode == modeConfirmSQL || s.mode == modeFilter ||
+		s.mode == modeBackup {
 		return true
 	}
 	if s.mode == modeHistory {
@@ -423,6 +427,8 @@ func (s dashboardScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		}
 		s.notice, s.noticeErr = fmt.Sprintf("%s has %d row(s)", msg.table, msg.n), false
 		return s, nil
+	case backupDoneMsg:
+		return s.applyBackupDone(msg)
 
 	case grantsLoadedMsg:
 		// Only apply if the matrix is still open on the same user+database.
@@ -529,6 +535,8 @@ func (s dashboardScreen) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s.startCount()
 	case key.Matches(msg, Keys.Filter):
 		return s.startFilter()
+	case key.Matches(msg, Keys.Backup):
+		return s.startBackup()
 	case key.Matches(msg, Keys.Focus):
 		s.focus = s.nextFocus()
 		return s, s.syncEditorFocus()
@@ -743,6 +751,12 @@ func (s dashboardScreen) Help() []key.Binding {
 			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "apply")),
 			Keys.Back,
 		}
+	case modeBackup:
+		return []key.Binding{
+			Keys.Up, Keys.Down,
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "next")),
+			Keys.Back,
+		}
 	case modeInsertRow:
 		return []key.Binding{
 			Keys.Up, Keys.Down,
@@ -763,7 +777,7 @@ func (s dashboardScreen) Help() []key.Binding {
 	b := []key.Binding{Keys.Focus, Keys.Up, Keys.Down}
 	switch s.focus {
 	case focusDatabases:
-		b = append(b, Keys.Select, Keys.Create, Keys.Delete)
+		b = append(b, Keys.Select, Keys.Create, Keys.Delete, Keys.Backup)
 	case focusTables:
 		b = append(b, Keys.Select, Keys.Info, Keys.InsertRow, Keys.Filter, Keys.RowCount, Keys.Truncate)
 	case focusUsers:
