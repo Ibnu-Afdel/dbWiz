@@ -91,6 +91,16 @@ func (s SSHSpec) String() string {
 	return fmt.Sprintf("%s@%s:%d", s.User, s.Host, s.Port)
 }
 
+// DockerHost renders the spec as a DOCKER_HOST value, so the docker CLI talks to
+// the remote daemon over SSH (v3 3.3). The port is always explicit.
+func (s SSHSpec) DockerHost() string {
+	port := s.Port
+	if port == 0 {
+		port = 22
+	}
+	return fmt.Sprintf("ssh://%s@%s:%d", s.User, s.Host, port)
+}
+
 // authMethodsFn and hostKeyFn are seams: production reads the SSH agent, the
 // user's key files, and ~/.ssh/known_hosts; tests substitute a fixed key and
 // host-key check so the tunnel can be exercised against an in-process server.

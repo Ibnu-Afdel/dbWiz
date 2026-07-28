@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // imageEngines maps a normalized image repository to the engine it runs.
@@ -52,8 +53,20 @@ func Detect(ctx context.Context) ([]Container, error) {
 	return detect(ctx, dockerCLI, onOmarchy())
 }
 
+// DetectRemote scans a remote Docker daemon reachable over SSH and returns its
+// database containers, reusing the exact local detection logic (v3 3.3).
+// dockerHost is a DOCKER_HOST value like "ssh://user@host:port". Omarchy
+// annotation is skipped — being on Omarchy is a property of the local machine.
+func DetectRemote(ctx context.Context, dockerHost string) ([]Container, error) {
+	return detectWithin(ctx, remoteCLI(dockerHost), false, remoteOpTimeout)
+}
+
 func detect(ctx context.Context, run dockerRunner, omarchy bool) ([]Container, error) {
-	ctx, cancel := context.WithTimeout(ctx, detectTimeout)
+	return detectWithin(ctx, run, omarchy, detectTimeout)
+}
+
+func detectWithin(ctx context.Context, run dockerRunner, omarchy bool, timeout time.Duration) ([]Container, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	stdout, stderr, err := run(ctx, "ps", "-a", "--format", "json")

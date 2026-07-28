@@ -28,6 +28,7 @@ const (
 	choiceExisting
 	choiceSaved
 	choiceManual
+	choiceRemoteScan
 	choiceCreate
 	choiceSetup
 	choiceSQLite
@@ -44,7 +45,9 @@ func (c homeChoice) label() string {
 	case choiceSaved:
 		return "Connect to a saved target…"
 	case choiceManual:
-		return "Connect to a database by host/port…"
+		return "Connect by host/port…"
+	case choiceRemoteScan:
+		return "Scan a remote host over SSH…"
 	case choiceCreate:
 		return "Create a new database…"
 	case choiceSetup:
@@ -107,9 +110,10 @@ func newHome(containers []docker.Container, cont *continueTarget) Screen {
 	if len(saved) > 0 {
 		choices = append(choices, choiceSaved)
 	}
-	// Manual host/port entry is always available — it's the escape hatch for any
-	// database DBWiz can't discover through Docker (v3 3.1).
-	choices = append(choices, choiceManual)
+	// Manual host/port entry and remote SSH scanning are always available — the
+	// escape hatches for databases DBWiz can't discover through the local Docker
+	// (v3 3.1 / 3.3).
+	choices = append(choices, choiceManual, choiceRemoteScan)
 	choices = append(choices, choiceCreate, choiceSetup, choiceSQLite)
 	// The doctor row appears only when there's a container to diagnose (v3 1.3).
 	if len(containers) > 0 {
@@ -205,6 +209,8 @@ func (s homeScreen) choose() (Screen, tea.Cmd) {
 		return s, savedRoute(s.saved)
 	case choiceManual:
 		return s, Push(NewManualConnect())
+	case choiceRemoteScan:
+		return s, Push(NewRemoteScan())
 	case choiceCreate:
 		return s, createRoute(s.containers)
 	case choiceSetup:
@@ -284,6 +290,8 @@ func (s homeScreen) choiceDetail(c homeChoice) string {
 		return fmt.Sprintf("(%d saved)", len(s.saved))
 	case choiceManual:
 		return "(any reachable Postgres/MySQL — no Docker)"
+	case choiceRemoteScan:
+		return "(docker ps on a server, over SSH)"
 	case choiceCreate:
 		return "(create + connect in one flow)"
 	case choiceSetup:

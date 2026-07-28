@@ -56,6 +56,15 @@ func TestSSHSpecString(t *testing.T) {
 	}
 }
 
+func TestSSHSpecDockerHost(t *testing.T) {
+	if h := (SSHSpec{User: "deploy", Host: "1.2.3.4"}).DockerHost(); h != "ssh://deploy@1.2.3.4:22" {
+		t.Errorf("DockerHost default port = %q", h)
+	}
+	if h := (SSHSpec{User: "deploy", Host: "h", Port: 2222}).DockerHost(); h != "ssh://deploy@h:2222" {
+		t.Errorf("DockerHost = %q", h)
+	}
+}
+
 // TestTunnelForwards is the end-to-end proof: Dial an in-process SSH server, open
 // a tunnel to a local echo backend through it, and confirm bytes round-trip.
 // After Close the local port stops accepting.

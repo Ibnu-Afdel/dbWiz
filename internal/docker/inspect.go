@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // inspectData mirrors the fields we consume from `docker inspect <name>`, which
@@ -34,8 +35,18 @@ func Inspect(ctx context.Context, name string, eng Engine) (hostPort int, creds 
 	return inspect(ctx, dockerCLI, name, eng)
 }
 
+// InspectRemote is Inspect against a remote Docker daemon over SSH (v3 3.3).
+// dockerHost is a DOCKER_HOST value like "ssh://user@host:port".
+func InspectRemote(ctx context.Context, dockerHost, name string, eng Engine) (int, Creds, error) {
+	return inspectWithin(ctx, remoteCLI(dockerHost), name, eng, remoteOpTimeout)
+}
+
 func inspect(ctx context.Context, run dockerRunner, name string, eng Engine) (int, Creds, error) {
-	ctx, cancel := context.WithTimeout(ctx, detectTimeout)
+	return inspectWithin(ctx, run, name, eng, detectTimeout)
+}
+
+func inspectWithin(ctx context.Context, run dockerRunner, name string, eng Engine, timeout time.Duration) (int, Creds, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	stdout, stderr, err := run(ctx, "inspect", name)
