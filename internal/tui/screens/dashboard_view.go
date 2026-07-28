@@ -180,6 +180,8 @@ func (s dashboardScreen) renderOverlay(width, height int) string {
 		body = s.completeList.View(width)
 	case modeCell:
 		return s.renderCellOverlay(width, height)
+	case modeEditCell:
+		body = s.cellEditView(width)
 	}
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, body)
 }

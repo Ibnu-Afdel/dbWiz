@@ -1,0 +1,117 @@
+package db
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
+
+// ErrNoRowIdentity is returned by the row-mutation builders when a table has no
+// primary key, so the row to change can't be pinned down safely. The browser
+// surfaces this as a plain "can't edit — no primary key" notice rather than
+// risking a WHERE that matches many rows (v3 2.1/2.2).
+var ErrNoRowIdentity = errors.New("table has no primary key to identify the row")
+
+// BuildUpdate constructs an UPDATE that sets one column of a single row to newVal,
+// identifying that row by its primary-key columns. Identifiers are quoted for the
+// engine; values render as quoted literals (a nil *newVal is NULL; a nil key
+// value becomes IS NULL), matching how the browser reads cells back as text. The
+// SQL is returned so the browser can show it before it runs (v3 2.1) and then
+// execute it via Engine.ExecMutation.
+func BuildUpdate(kind Kind, database, table string, keyCols []string, keyVals []any, setCol string, newVal *string) (string, error) {
+	if len(keyCols) == 0 {
+		return "", ErrNoRowIdentity
+	}
+	q := quoterFor(kind)
+	where, err := buildWhere(q, keyCols, keyVals)
+	if err != nil {
+		return "", err
+	}
+	set := q.ident(setCol) + " = " + q.value(newVal)
+	return fmt.Sprintf("UPDATE %s SET %s WHERE %s", q.table(database, table), set, where), nil
+}
+
+// quoter renders identifiers, literals, and qualified table names for one engine
+// family, reusing the same quoting the drivers use elsewhere so a generated
+// statement is quoted identically to a hand-built one.
+type quoter struct{ kind Kind }
+
+func quoterFor(kind Kind) quoter { return quoter{kind} }
+
+// ident quotes an identifier (column/table) for the engine.
+func (q quoter) ident(name string) string {
+	switch q.kind {
+	case KindMySQL, KindMariaDB:
+		return quoteMySQLIdent(name)
+	case KindSQLite:
+		return quoteSQLiteIdent(name)
+	default:
+		return quotePGIdent(name)
+	}
+}
+
+// literal quotes a string as a SQL string literal for the engine. Postgres and
+// SQLite share single-quote doubling; MySQL also escapes backslashes.
+func (q quoter) literal(s string) string {
+	switch q.kind {
+	case KindMySQL, KindMariaDB:
+		return quoteMySQLLiteral(s)
+	default:
+		return quotePGLiteral(s)
+	}
+}
+
+// value renders an optional new value: nil is the SQL keyword NULL, otherwise a
+// quoted string literal. The browser hands values back as text (see gather), so a
+// string literal is the right rendering; typed columns coerce it on the server.
+func (q quoter) value(v *string) string {
+	if v == nil {
+		return "NULL"
+	}
+	return q.literal(*v)
+}
+
+// table qualifies a table name the way each engine's browse methods do: MySQL and
+// MariaDB prefix the schema (database) when one is known; Postgres relies on the
+// ExecMutation-selected connection plus search_path, and SQLite has one database,
+// so both leave the table unqualified.
+func (q quoter) table(database, table string) string {
+	if (q.kind == KindMySQL || q.kind == KindMariaDB) && database != "" {
+		return quoteMySQLIdent(database) + "." + quoteMySQLIdent(table)
+	}
+	return q.ident(table)
+}
+
+// buildWhere renders an AND of equality (or IS NULL) predicates pinning a row by
+// its key columns. A nil value becomes IS NULL because "= NULL" never matches.
+func buildWhere(q quoter, cols []string, vals []any) (string, error) {
+	if len(cols) != len(vals) {
+		return "", fmt.Errorf("key columns (%d) and values (%d) don't line up", len(cols), len(vals))
+	}
+	parts := make([]string, len(cols))
+	for i, c := range cols {
+		lit, isNull := q.cell(vals[i])
+		if isNull {
+			parts[i] = q.ident(c) + " IS NULL"
+		} else {
+			parts[i] = q.ident(c) + " = " + lit
+		}
+	}
+	return strings.Join(parts, " AND "), nil
+}
+
+// cell renders a grid cell value as a literal for a WHERE/VALUES clause. nil (SQL
+// NULL) reports isNull so the caller can choose IS NULL; []byte and other types
+// are stringified then quoted, mirroring how the browser displays them.
+func (q quoter) cell(v any) (lit string, isNull bool) {
+	switch t := v.(type) {
+	case nil:
+		return "", true
+	case string:
+		return q.literal(t), false
+	case []byte:
+		return q.literal(string(t)), false
+	default:
+		return q.literal(fmt.Sprint(t)), false
+	}
+}

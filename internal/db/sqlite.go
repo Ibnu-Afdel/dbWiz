@@ -253,3 +253,13 @@ func (s *SQLite) Query(ctx context.Context, sql string) (Result, error) {
 	}
 	return res, nil
 }
+
+// ExecMutation runs the pre-built statement. SQLite hosts a single database, so
+// database is accepted only for interface symmetry.
+func (s *SQLite) ExecMutation(ctx context.Context, database, sql string) (Result, error) {
+	res, err := runSQL(ctx, s.pool, sql)
+	if err != nil {
+		return Result{}, classifySQLite(err)
+	}
+	return res, nil
+}

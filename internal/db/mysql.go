@@ -393,3 +393,14 @@ func (m *MySQL) Query(ctx context.Context, sql string) (Result, error) {
 	}
 	return res, nil
 }
+
+// ExecMutation runs the pre-built statement. MySQL's builder qualifies the table
+// with its schema (see quoter.table), so there is no per-database reconnect to do
+// — database is accepted for interface symmetry and left to the SQL.
+func (m *MySQL) ExecMutation(ctx context.Context, database, sql string) (Result, error) {
+	res, err := runSQL(ctx, m.pool, sql)
+	if err != nil {
+		return Result{}, classifyMySQL(err)
+	}
+	return res, nil
+}

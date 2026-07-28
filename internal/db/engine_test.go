@@ -46,6 +46,9 @@ func (stubEngine) ListGrants(context.Context, string, string) ([]Privilege, erro
 func (stubEngine) SetGrant(context.Context, string, string, Privilege, bool) error { return nil }
 
 func (stubEngine) Query(context.Context, string) (Result, error) { return Result{}, nil }
+func (stubEngine) ExecMutation(context.Context, string, string) (Result, error) {
+	return Result{}, nil
+}
 
 // Compile-time assertion that stubEngine satisfies Engine.
 var _ Engine = stubEngine{}

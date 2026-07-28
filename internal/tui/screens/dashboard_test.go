@@ -31,6 +31,14 @@ type fakeEngine struct {
 	queryErr    error
 	lastQuery   string
 
+	// Mutation recorder (v3 2.x). lastMutationSQL/DB capture the last ExecMutation
+	// call; mutationErr forces it to fail; mutationAffected is the RowsAffected it
+	// reports back.
+	lastMutationSQL  string
+	lastMutationDB   string
+	mutationErr      error
+	mutationAffected int64
+
 	closed          bool
 	lastListTables  string
 	lastPreviewDB   string
@@ -171,6 +179,14 @@ func (f *fakeEngine) Query(_ context.Context, sql string) (db.Result, error) {
 		return db.Result{}, f.queryErr
 	}
 	return f.queryResult, nil
+}
+
+func (f *fakeEngine) ExecMutation(_ context.Context, database, sql string) (db.Result, error) {
+	f.lastMutationDB, f.lastMutationSQL = database, sql
+	if f.mutationErr != nil {
+		return db.Result{}, f.mutationErr
+	}
+	return db.Result{RowsAffected: f.mutationAffected}, nil
 }
 
 // pgEngine is a fake server engine (multi-database) seeded with two databases

@@ -45,6 +45,7 @@ const (
 	modeSaved                     // the searchable saved/favourite-query picker (v2 2.2)
 	modeExport                    // the CSV/JSON results-export chooser (v2 2.3)
 	modeComplete                  // the schema-aware autocomplete picker (v2 2.5)
+	modeEditCell                  // the results cell editor that generates an UPDATE (v3 2.1)
 )
 
 // formPurpose records which create command a submitted form should run.
@@ -178,6 +179,10 @@ type dashboardScreen struct {
 	// mode. Off by default, in which case the editor never intercepts keys.
 	vim vimState
 
+	// cellEdit backs the results cell editor (v3 2.1): the value input plus the
+	// row identity (primary-key columns/values) needed to generate a safe UPDATE.
+	cellEdit cellEditState
+
 	// columnCache maps a table name to its column names, warmed as the user
 	// previews or describes tables. It's the "cached metadata" the editor's
 	// schema-aware autocomplete draws on (v2 2.5) — no extra queries, just what
@@ -252,7 +257,7 @@ func (s dashboardScreen) Title() string { return s.container.Name }
 // form or type-the-name confirm is open, or while the SQL editor has focus. It
 // satisfies screens.TextInputer.
 func (s dashboardScreen) CapturesText() bool {
-	if s.mode == modeForm || s.mode == modeConfirm {
+	if s.mode == modeForm || s.mode == modeConfirm || s.mode == modeEditCell {
 		return true
 	}
 	if s.mode == modeHistory {
@@ -387,6 +392,11 @@ func (s dashboardScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	case openCreateDBMsg:
 		return s.openCreateDB()
 
+	case editPrepMsg:
+		return s.openCellEdit(msg)
+	case mutationDoneMsg:
+		return s.applyMutationDone(msg)
+
 	case grantsLoadedMsg:
 		// Only apply if the matrix is still open on the same user+database.
 		if s.mode == modeGrant && msg.user == s.grant.subject && msg.database == s.grant.database {
@@ -480,6 +490,8 @@ func (s dashboardScreen) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s.copyCell()
 	case key.Matches(msg, Keys.CopyRow):
 		return s.copyRow()
+	case key.Matches(msg, Keys.EditCell):
+		return s.startCellEdit()
 	case key.Matches(msg, Keys.Focus):
 		s.focus = s.nextFocus()
 		return s, s.syncEditorFocus()
@@ -677,6 +689,12 @@ func (s dashboardScreen) Help() []key.Binding {
 			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "insert")),
 			Keys.Back,
 		}
+	case modeEditCell:
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "run update")),
+			key.NewBinding(key.WithKeys("alt+n"), key.WithHelp("⌥n", "toggle NULL")),
+			Keys.Back,
+		}
 	}
 	// A running statement can only be cancelled.
 	if s.querying {
@@ -698,7 +716,7 @@ func (s dashboardScreen) Help() []key.Binding {
 		b = append(b,
 			key.NewBinding(key.WithKeys("left", "right"), key.WithHelp("←/→", "columns")),
 			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "inspect cell")),
-			Keys.CopyCell, Keys.CopyRow, Keys.Export,
+			Keys.EditCell, Keys.CopyCell, Keys.CopyRow, Keys.Export,
 		)
 	}
 	b = append(b, Keys.Edit, Keys.HistoryList, Keys.SavedList, Keys.Refresh, Keys.Back)

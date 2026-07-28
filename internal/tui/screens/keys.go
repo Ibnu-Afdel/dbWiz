@@ -64,6 +64,11 @@ type KeyMap struct {
 	// Complete opens schema-aware autocomplete for the word under the cursor in the
 	// SQL editor (v2 2.5).
 	Complete key.Binding
+
+	// EditCell opens the results cell editor, which generates and runs an UPDATE
+	// for the selected cell (v3 2.1). It fires only in the results pane, so a plain
+	// letter is safe.
+	EditCell key.Binding
 }
 
 // Keys is the single instance every screen and the root model share.
@@ -208,5 +213,11 @@ var Keys = KeyMap{
 	Complete: key.NewBinding(
 		key.WithKeys("ctrl+space"),
 		key.WithHelp("^space", "autocomplete"),
+	),
+	// u edits the selected cell — a plain letter, safe because it only fires in the
+	// results pane where no free text is being typed.
+	EditCell: key.NewBinding(
+		key.WithKeys("u"),
+		key.WithHelp("u", "edit cell"),
 	),
 }

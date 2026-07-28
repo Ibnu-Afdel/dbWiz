@@ -93,6 +93,9 @@ func (e *teatestEngine) SetGrant(context.Context, string, string, db.Privilege, 
 func (e *teatestEngine) Query(context.Context, string) (db.Result, error) {
 	return db.Result{Columns: []string{"answer"}, Rows: [][]any{{"ANSWER_42"}}}, nil
 }
+func (e *teatestEngine) ExecMutation(context.Context, string, string) (db.Result, error) {
+	return db.Result{RowsAffected: 1}, nil
+}
 
 // runningPG is a fully-specified container so the credential ladder resolves
 // entirely from its recovered creds — no docker inspect / .env rungs fire.

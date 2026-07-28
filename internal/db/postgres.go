@@ -465,3 +465,17 @@ func (p *Postgres) Query(ctx context.Context, sql string) (Result, error) {
 	}
 	return res, nil
 }
+
+// ExecMutation reconnects to database (Postgres databases are isolated, so a
+// statement against another one needs its own connection — the same reason the
+// browse methods call ensureDB) and runs the pre-built statement there.
+func (p *Postgres) ExecMutation(ctx context.Context, database, sql string) (Result, error) {
+	if err := p.ensureDB(ctx, database); err != nil {
+		return Result{}, err
+	}
+	res, err := runSQL(ctx, p.pool, sql)
+	if err != nil {
+		return Result{}, classifyPostgres(err)
+	}
+	return res, nil
+}

@@ -147,4 +147,12 @@ type Engine interface {
 
 	// Query runs an arbitrary statement. Cancellation flows through ctx.
 	Query(ctx context.Context, sql string) (Result, error)
+
+	// ExecMutation runs a data-modifying statement (built by BuildUpdate/
+	// BuildInsert/BuildDelete) against a specific database, selecting it first
+	// where the engine needs to — Postgres reconnects to database, MySQL/SQLite
+	// take it as already qualified in the SQL. It is separate from Query so the
+	// browser's write actions (v3 2.x) don't depend on whatever database the
+	// ad-hoc query pool happens to be pointed at. Cancellation flows through ctx.
+	ExecMutation(ctx context.Context, database, sql string) (Result, error)
 }
