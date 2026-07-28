@@ -29,6 +29,7 @@ type confirmModel struct {
 	message string
 	target  string // the exact string the user must type to enable accept
 	input   textinput.Model
+	remote  bool // adds a REMOTE caution banner for a non-local target (v3 3.4)
 }
 
 // newConfirm builds a confirm prompt requiring target to be typed verbatim.
@@ -38,6 +39,14 @@ func newConfirm(title, message, target string) confirmModel {
 	in.Placeholder = target
 	in.Focus()
 	return confirmModel{title: title, message: message, target: target, input: in}
+}
+
+// onRemote flags the confirm as acting on a non-local target, adding the REMOTE
+// caution banner. Typing the exact name is already the strong gate here, so the
+// banner is the "extra" the remote rails add (v3 3.4).
+func (c confirmModel) onRemote(remote bool) confirmModel {
+	c.remote = remote
+	return c
 }
 
 func (c confirmModel) Init() tea.Cmd { return textinput.Blink }
@@ -68,16 +77,18 @@ func (c confirmModel) View(width int) string {
 	if c.matched() {
 		confirmLine = styles.DangerText.Render("enter to confirm") + styles.Hint.Render(" · esc to cancel")
 	}
-	body := lipgloss.JoinVertical(lipgloss.Left,
-		styles.ErrorTitle.Render(c.title),
-		"",
+	lines := []string{styles.ErrorTitle.Render(c.title), ""}
+	if c.remote {
+		lines = append(lines, styles.DangerBadge.Render(" REMOTE ")+" "+styles.DangerText.Render("This is a non-local database."), "")
+	}
+	lines = append(lines,
 		styles.Subtitle.Render(c.message),
 		styles.Hint.Render("Type ")+styles.DangerText.Render(c.target)+styles.Hint.Render(" to confirm:"),
 		c.input.View(),
 		"",
 		confirmLine,
 	)
-	return styles.ErrorBox.Render(body)
+	return styles.ErrorBox.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
 func (c confirmModel) Help() []key.Binding {

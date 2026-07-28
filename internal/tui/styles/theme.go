@@ -69,9 +69,10 @@ var (
 	Selected lipgloss.Style // the focused row in a menu or list
 	Item     lipgloss.Style // an unfocused, selectable row
 
-	Running lipgloss.Style // a detected running container
-	Stopped lipgloss.Style // a detected stopped container
-	Badge   lipgloss.Style // provenance tag (e.g. the Omarchy badge)
+	Running     lipgloss.Style // a detected running container
+	Stopped     lipgloss.Style // a detected stopped container
+	Badge       lipgloss.Style // provenance tag (e.g. the Omarchy badge)
+	DangerBadge lipgloss.Style // loud inverse tag for a non-local target (REMOTE)
 
 	DangerText  lipgloss.Style // inline colored spans
 	SuccessText lipgloss.Style
@@ -109,6 +110,9 @@ func rebuild() {
 	Running = lipgloss.NewStyle().Bold(true).Foreground(Success)
 	Stopped = lipgloss.NewStyle().Foreground(Muted)
 	Badge = lipgloss.NewStyle().Foreground(Warning)
+	// DangerBadge is inverse (danger background, light text) so REMOTE reads as a
+	// warning label, not just colored text.
+	DangerBadge = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("231")).Background(Danger)
 
 	DangerText = lipgloss.NewStyle().Foreground(Danger)
 	SuccessText = lipgloss.NewStyle().Foreground(Success)

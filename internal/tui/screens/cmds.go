@@ -3,6 +3,7 @@ package screens
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -48,11 +49,14 @@ type (
 	startErrMsg struct{ err *docker.DockerError }
 
 	// connectedMsg carries a live engine plus the target it connected to; the
-	// connect screen pushes the dashboard with it.
+	// connect screen pushes the dashboard with it. remote marks a non-local
+	// connection (SSH tunnel or non-loopback host) so the dashboard shows the
+	// REMOTE rails (v3 3.4).
 	connectedMsg struct {
 		engine    db.Engine
 		target    db.Target
 		container docker.Container
+		remote    bool
 	}
 	// connectAuthMsg means every non-interactive rung of the credential ladder
 	// was exhausted and the server rejected the login — the connect screen drops
@@ -468,8 +472,27 @@ func connectManualCmd(name string, kind db.Kind, base db.Target, ssh *remote.SSH
 		if tunnel != nil {
 			engine = tunneledEngine{Engine: engine, tunnel: tunnel}
 		}
-		return connectedMsg{engine: engine, target: target, container: manualContainer(name, kind, base.Port)}
+		return connectedMsg{
+			engine:    engine,
+			target:    target,
+			container: manualContainer(name, kind, base.Port),
+			remote:    manualIsRemote(base.Host, ssh),
+		}
 	}
+}
+
+// manualIsRemote reports whether a manual connection is non-local: any SSH
+// tunnel is remote, and so is a direct connection to a non-loopback host. A
+// direct 127.0.0.1/localhost target (a host-native server) is treated as local.
+func manualIsRemote(host string, ssh *remote.SSHSpec) bool {
+	if ssh != nil {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(host)) {
+	case "127.0.0.1", "::1", "localhost", "":
+		return false
+	}
+	return true
 }
 
 // openTunnel dials the SSH host and opens a local forward to host:port as seen

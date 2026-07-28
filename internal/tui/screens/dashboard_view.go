@@ -91,6 +91,11 @@ func (s dashboardScreen) renderStatusBar(width int) string {
 		parts = append(parts, "db: "+s.currentDB)
 	}
 	left := styles.Subtitle.Render(strings.Join(parts, "  ·  "))
+	// A non-local target wears a loud REMOTE badge so a destructive action is never
+	// mistaken for one on a throwaway local container (v3 3.4).
+	if s.remote {
+		left = styles.DangerBadge.Render(" REMOTE ") + " " + left
+	}
 
 	// A transient result toast or "working…" indicator sits between the target
 	// and the pill.

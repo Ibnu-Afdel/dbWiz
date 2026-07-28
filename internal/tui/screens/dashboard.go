@@ -91,6 +91,10 @@ type dashboardScreen struct {
 	target    db.Target
 	container docker.Container
 	caps      db.Capabilities
+	// remote marks a non-local connection — an SSH tunnel, or a manual target to a
+	// non-loopback host. It drives the REMOTE status badge and the extra
+	// confirmation step on destructive actions (v3 3.4).
+	remote bool
 
 	width, height int
 	focus         focusTarget

@@ -160,7 +160,9 @@ func (s connectScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		if s.create {
 			return s, Replace(NewDashboardCreating(msg.engine, msg.target, msg.container))
 		}
-		return s, Replace(NewDashboard(msg.engine, msg.target, msg.container))
+		d := NewDashboard(msg.engine, msg.target, msg.container).(dashboardScreen)
+		d.remote = msg.remote
+		return s, Replace(d)
 	case connectAuthMsg:
 		s.target = msg.target
 		if s.submitted {

@@ -76,7 +76,7 @@ func (s dashboardScreen) openDelete() (dashboardScreen, tea.Cmd) {
 		s.confirmKind, s.confirmTarget = confirmDropDB, d.Name
 		s.confirm = newConfirm("Delete database",
 			fmt.Sprintf("This permanently drops %q and everything in it. This cannot be undone.", d.Name),
-			d.Name)
+			d.Name).onRemote(s.remote)
 		s.mode, s.notice = modeConfirm, ""
 		return s, s.confirm.Init()
 	case focusUsers:
@@ -87,7 +87,7 @@ func (s dashboardScreen) openDelete() (dashboardScreen, tea.Cmd) {
 		s.confirmKind, s.confirmTarget = confirmDropUser, u.Name
 		s.confirm = newConfirm("Delete user",
 			fmt.Sprintf("This permanently drops the user %q.", u.Name),
-			u.Name)
+			u.Name).onRemote(s.remote)
 		s.mode, s.notice = modeConfirm, ""
 		return s, s.confirm.Init()
 	}

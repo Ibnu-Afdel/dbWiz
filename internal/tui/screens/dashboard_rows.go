@@ -18,37 +18,71 @@ import (
 
 // confirmSQLState backs a one-key confirm that shows the exact statement it will
 // run and then runs it — used for deleting a row and truncating a table. title is
-// the danger-styled question; notice is what's shown after it succeeds.
+// the danger-styled question; notice is what's shown after it succeeds. On a
+// remote target (v3 3.4) the confirm demands a typed "yes" (accumulated in ack)
+// as the extra step, so a destructive action on a non-local database can't fire
+// on a single Enter.
 type confirmSQLState struct {
 	title    string
 	database string
 	sql      string
 	notice   string
+	remote   bool
+	ack      string
 }
 
-// updateConfirmSQL handles the confirm: enter runs the statement, esc cancels.
+// updateConfirmSQL handles the confirm: enter runs the statement, esc cancels. On
+// a remote target enter is inert until "yes" has been typed.
 func (s dashboardScreen) updateConfirmSQL(msg tea.KeyPressMsg) (dashboardScreen, tea.Cmd) {
 	switch {
 	case key.Matches(msg, Keys.Back):
 		s.mode = modeBrowse
 		return s, nil
 	case msg.String() == "enter":
+		if s.confirmSQL.remote && s.confirmSQL.ack != "yes" {
+			return s, nil // extra step on a remote target: must type yes first
+		}
 		c := s.confirmSQL
 		s.mode = modeBrowse
 		s.working = true
 		return s, tea.Batch(s.spinner.Tick, execMutationCmd(s.engine, c.database, c.sql, c.notice))
 	}
+	// On a remote target, collect the typed acknowledgement.
+	if s.confirmSQL.remote {
+		if msg.String() == "backspace" {
+			if n := len(s.confirmSQL.ack); n > 0 {
+				s.confirmSQL.ack = s.confirmSQL.ack[:n-1]
+			}
+		} else if msg.Text != "" {
+			s.confirmSQL.ack += msg.Text
+		}
+	}
 	return s, nil
 }
 
 // confirmSQLView renders the confirm in the danger palette, showing the exact
-// statement before it runs.
+// statement before it runs. A remote target adds the REMOTE banner and the
+// type-yes gate.
 func (s dashboardScreen) confirmSQLView(width int) string {
 	inner := clamp(width-8, 20, 100)
 	title := styles.ErrorTitle.Render(s.confirmSQL.title)
 	sqlBlock := styles.Hint.Render("Will run:") + "\n" + styles.DangerText.Width(inner).Render(s.confirmSQL.sql)
-	help := styles.Hint.Render("enter confirm · esc cancel")
-	return styles.OverlayBox.Render(lipgloss.JoinVertical(lipgloss.Left, title, "", sqlBlock, "", help))
+	lines := []string{title, "", sqlBlock, ""}
+	if s.confirmSQL.remote {
+		lines = append(lines,
+			styles.DangerBadge.Render(" REMOTE ")+" "+styles.DangerText.Render("This runs on a non-local database."),
+			styles.Hint.Render("Type ")+styles.DangerText.Render("yes")+styles.Hint.Render(" to confirm: ")+styles.Subtitle.Render(s.confirmSQL.ack),
+			"",
+		)
+		if s.confirmSQL.ack == "yes" {
+			lines = append(lines, styles.DangerText.Render("enter to confirm")+styles.Hint.Render(" · esc cancel"))
+		} else {
+			lines = append(lines, styles.Hint.Render("enter disabled until you type yes · esc cancel"))
+		}
+	} else {
+		lines = append(lines, styles.Hint.Render("enter confirm · esc cancel"))
+	}
+	return styles.OverlayBox.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
 // startTruncate opens a confirm to empty the table in context (v3 2.3). It works
@@ -63,6 +97,7 @@ func (s dashboardScreen) startTruncate() (dashboardScreen, tea.Cmd) {
 		database: s.currentDB,
 		sql:      db.BuildTruncate(s.engine.Kind(), s.currentDB, table),
 		notice:   "Truncated " + table,
+		remote:   s.remote,
 	}
 	s.mode = modeConfirmSQL
 	return s, nil
@@ -147,6 +182,7 @@ func (s dashboardScreen) openDeleteRow(msg deletePrepMsg) (dashboardScreen, tea.
 		database: msg.database,
 		sql:      sql,
 		notice:   "Deleted a row from " + msg.table,
+		remote:   s.remote,
 	}
 	s.mode = modeConfirmSQL
 	return s, nil
