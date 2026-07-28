@@ -11,6 +11,7 @@ package health
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/Ibnu-Afdel/dbwiz/internal/db"
 	"github.com/Ibnu-Afdel/dbwiz/internal/docker"
@@ -144,7 +145,7 @@ func portCheck(ctx context.Context, t Target) Check {
 		return Check{"Port reachable", Skip, "no published host port"}
 	}
 	if reachable(ctx, t.Port) {
-		return Check{"Port reachable", OK, "127.0.0.1 port is open"}
+		return Check{"Port reachable", OK, fmt.Sprintf("127.0.0.1:%d is open", t.Port)}
 	}
 	return Check{"Port reachable", Fail, "nothing is accepting connections on the host port yet"}
 }

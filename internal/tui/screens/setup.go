@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
@@ -150,6 +151,14 @@ func (s setupScreen) View(width, height int) string {
 	b.WriteString(styles.Hint.Render(rule(width)))
 	b.WriteString("\n")
 
+	labelW := 0
+	for _, sp := range s.specs {
+		if w := lipgloss.Width(setupLabel(sp)); w > labelW {
+			labelW = w
+		}
+	}
+	labelW += 2 // gap before the auth detail
+
 	for i, sp := range s.specs {
 		cursor := "  "
 		label := styles.Item.Render(setupLabel(sp))
@@ -158,7 +167,7 @@ func (s setupScreen) View(width, height int) string {
 			label = styles.Selected.Render(setupLabel(sp))
 		}
 		detail := styles.Hint.Render(sp.Auth)
-		b.WriteString(cursor + padRight(label, 30) + detail + "\n")
+		b.WriteString(cursor + padRight(label, labelW) + detail + "\n")
 	}
 
 	b.WriteString(styles.Hint.Render(rule(width)))
