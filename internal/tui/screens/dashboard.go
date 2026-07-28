@@ -36,16 +36,18 @@ const (
 type adminMode int
 
 const (
-	modeBrowse   adminMode = iota // the three-pane browser
-	modeForm                      // a create form (database or user)
-	modeConfirm                   // a type-the-name destructive confirm
-	modeGrant                     // the grant/revoke picker
-	modeCell                      // the results cell-detail overlay (full value)
-	modeHistory                   // the searchable per-target query-history picker (v2 2.1)
-	modeSaved                     // the searchable saved/favourite-query picker (v2 2.2)
-	modeExport                    // the CSV/JSON results-export chooser (v2 2.3)
-	modeComplete                  // the schema-aware autocomplete picker (v2 2.5)
-	modeEditCell                  // the results cell editor that generates an UPDATE (v3 2.1)
+	modeBrowse    adminMode = iota // the three-pane browser
+	modeForm                       // a create form (database or user)
+	modeConfirm                    // a type-the-name destructive confirm
+	modeGrant                      // the grant/revoke picker
+	modeCell                       // the results cell-detail overlay (full value)
+	modeHistory                    // the searchable per-target query-history picker (v2 2.1)
+	modeSaved                      // the searchable saved/favourite-query picker (v2 2.2)
+	modeExport                     // the CSV/JSON results-export chooser (v2 2.3)
+	modeComplete                   // the schema-aware autocomplete picker (v2 2.5)
+	modeEditCell                   // the results cell editor that generates an UPDATE (v3 2.1)
+	modeDeleteRow                  // the delete-this-row confirm showing the DELETE (v3 2.2)
+	modeInsertRow                  // the generated insert form (v3 2.2)
 )
 
 // formPurpose records which create command a submitted form should run.
@@ -182,6 +184,10 @@ type dashboardScreen struct {
 	// cellEdit backs the results cell editor (v3 2.1): the value input plus the
 	// row identity (primary-key columns/values) needed to generate a safe UPDATE.
 	cellEdit cellEditState
+	// deleteRow / insertRow back the row delete-confirm and the generated insert
+	// form (v3 2.2).
+	deleteRow deleteRowState
+	insertRow insertRowState
 
 	// columnCache maps a table name to its column names, warmed as the user
 	// previews or describes tables. It's the "cached metadata" the editor's
@@ -257,7 +263,8 @@ func (s dashboardScreen) Title() string { return s.container.Name }
 // form or type-the-name confirm is open, or while the SQL editor has focus. It
 // satisfies screens.TextInputer.
 func (s dashboardScreen) CapturesText() bool {
-	if s.mode == modeForm || s.mode == modeConfirm || s.mode == modeEditCell {
+	if s.mode == modeForm || s.mode == modeConfirm || s.mode == modeEditCell ||
+		s.mode == modeInsertRow || s.mode == modeDeleteRow {
 		return true
 	}
 	if s.mode == modeHistory {
@@ -394,6 +401,10 @@ func (s dashboardScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 
 	case editPrepMsg:
 		return s.openCellEdit(msg)
+	case deletePrepMsg:
+		return s.openDeleteRow(msg)
+	case insertPrepMsg:
+		return s.openInsertRow(msg)
 	case mutationDoneMsg:
 		return s.applyMutationDone(msg)
 
@@ -492,6 +503,10 @@ func (s dashboardScreen) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s.copyRow()
 	case key.Matches(msg, Keys.EditCell):
 		return s.startCellEdit()
+	case key.Matches(msg, Keys.InsertRow):
+		return s.startInsertRow()
+	case key.Matches(msg, Keys.DeleteRow):
+		return s.startDeleteRow()
 	case key.Matches(msg, Keys.Focus):
 		s.focus = s.nextFocus()
 		return s, s.syncEditorFocus()
@@ -695,6 +710,19 @@ func (s dashboardScreen) Help() []key.Binding {
 			key.NewBinding(key.WithKeys("alt+n"), key.WithHelp("⌥n", "toggle NULL")),
 			Keys.Back,
 		}
+	case modeDeleteRow:
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "delete")),
+			Keys.Back,
+		}
+	case modeInsertRow:
+		return []key.Binding{
+			Keys.Up, Keys.Down,
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "insert")),
+			key.NewBinding(key.WithKeys("alt+n"), key.WithHelp("⌥n", "NULL")),
+			key.NewBinding(key.WithKeys("alt+d"), key.WithHelp("⌥d", "default")),
+			Keys.Back,
+		}
 	}
 	// A running statement can only be cancelled.
 	if s.querying {
@@ -709,14 +737,14 @@ func (s dashboardScreen) Help() []key.Binding {
 	case focusDatabases:
 		b = append(b, Keys.Select, Keys.Create, Keys.Delete)
 	case focusTables:
-		b = append(b, Keys.Select, Keys.Info)
+		b = append(b, Keys.Select, Keys.Info, Keys.InsertRow)
 	case focusUsers:
 		b = append(b, Keys.Create, Keys.Delete, Keys.Grant, Keys.EditUser)
 	case focusResults:
 		b = append(b,
 			key.NewBinding(key.WithKeys("left", "right"), key.WithHelp("←/→", "columns")),
 			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "inspect cell")),
-			Keys.EditCell, Keys.CopyCell, Keys.CopyRow, Keys.Export,
+			Keys.EditCell, Keys.InsertRow, Keys.DeleteRow, Keys.CopyCell, Keys.CopyRow, Keys.Export,
 		)
 	}
 	b = append(b, Keys.Edit, Keys.HistoryList, Keys.SavedList, Keys.Refresh, Keys.Back)

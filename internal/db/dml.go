@@ -31,6 +31,43 @@ func BuildUpdate(kind Kind, database, table string, keyCols []string, keyVals []
 	return fmt.Sprintf("UPDATE %s SET %s WHERE %s", q.table(database, table), set, where), nil
 }
 
+// BuildDelete constructs a DELETE that removes the single row identified by its
+// primary-key columns (v3 2.2), quoted for the engine. Like BuildUpdate it
+// refuses without a key so a DELETE can't sweep more than the intended row.
+func BuildDelete(kind Kind, database, table string, keyCols []string, keyVals []any) (string, error) {
+	if len(keyCols) == 0 {
+		return "", ErrNoRowIdentity
+	}
+	q := quoterFor(kind)
+	where, err := buildWhere(q, keyCols, keyVals)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("DELETE FROM %s WHERE %s", q.table(database, table), where), nil
+}
+
+// BuildInsert constructs an INSERT for the given columns and values (v3 2.2).
+// Identifiers are quoted; a nil value inserts NULL. Columns the caller leaves out
+// of cols aren't named, so their database default (a sequence, a DEFAULT clause)
+// applies — which is how a serial primary key stays untouched.
+func BuildInsert(kind Kind, database, table string, cols []string, vals []*string) (string, error) {
+	if len(cols) == 0 {
+		return "", errors.New("no columns given to insert")
+	}
+	if len(cols) != len(vals) {
+		return "", fmt.Errorf("columns (%d) and values (%d) don't line up", len(cols), len(vals))
+	}
+	q := quoterFor(kind)
+	idents := make([]string, len(cols))
+	lits := make([]string, len(vals))
+	for i := range cols {
+		idents[i] = q.ident(cols[i])
+		lits[i] = q.value(vals[i])
+	}
+	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
+		q.table(database, table), strings.Join(idents, ", "), strings.Join(lits, ", ")), nil
+}
+
 // quoter renders identifiers, literals, and qualified table names for one engine
 // family, reusing the same quoting the drivers use elsewhere so a generated
 // statement is quoted identically to a hand-built one.

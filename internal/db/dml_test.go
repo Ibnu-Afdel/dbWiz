@@ -64,6 +64,37 @@ func TestBuildUpdateNoPK(t *testing.T) {
 	}
 }
 
+// TestBuildDelete builds a PK-scoped DELETE and refuses without a key.
+func TestBuildDelete(t *testing.T) {
+	sql, err := BuildDelete(KindPostgres, "", "orders", []string{"id"}, []any{"7"})
+	if err != nil {
+		t.Fatalf("BuildDelete: %v", err)
+	}
+	if sql != `DELETE FROM "orders" WHERE "id" = '7'` {
+		t.Fatalf("unexpected: %s", sql)
+	}
+	if _, err := BuildDelete(KindPostgres, "", "orders", nil, nil); !errors.Is(err, ErrNoRowIdentity) {
+		t.Fatalf("expected ErrNoRowIdentity, got %v", err)
+	}
+}
+
+// TestBuildInsert names only the given columns (so omitted ones take their DB
+// default) and renders a nil value as NULL.
+func TestBuildInsert(t *testing.T) {
+	sql, err := BuildInsert(KindMySQL, "shop", "orders",
+		[]string{"name", "note"}, []*string{strptr("widget"), nil})
+	if err != nil {
+		t.Fatalf("BuildInsert: %v", err)
+	}
+	want := "INSERT INTO `shop`.`orders` (`name`, `note`) VALUES ('widget', NULL)"
+	if sql != want {
+		t.Fatalf("got  %s\nwant %s", sql, want)
+	}
+	if _, err := BuildInsert(KindPostgres, "", "t", nil, nil); err == nil {
+		t.Fatal("expected an error with no columns")
+	}
+}
+
 // TestBuildUpdateQuotesInjection: a value with a quote is escaped, not breaking out.
 func TestBuildUpdateQuotesInjection(t *testing.T) {
 	sql, err := BuildUpdate(KindPostgres, "", "t", []string{"id"}, []any{"1"}, "name", strptr("O'Brien'; DROP TABLE t;--"))

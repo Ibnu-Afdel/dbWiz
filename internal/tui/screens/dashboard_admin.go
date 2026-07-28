@@ -188,6 +188,10 @@ func (s dashboardScreen) handleOverlayKey(msg tea.KeyPressMsg) (dashboardScreen,
 		return s.updateCell(msg)
 	case modeEditCell:
 		return s.updateCellEdit(msg)
+	case modeDeleteRow:
+		return s.updateDeleteRow(msg)
+	case modeInsertRow:
+		return s.updateInsertRow(msg)
 	case modeSaved:
 		var res savedResult
 		var cmd tea.Cmd

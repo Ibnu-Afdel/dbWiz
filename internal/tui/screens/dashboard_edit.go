@@ -73,13 +73,7 @@ func prepareEditCmd(engine db.Engine, database, table string, cols []string, row
 		if err != nil {
 			return editPrepMsg{err: asDBError(err)}
 		}
-		var keyCols []string
-		for _, c := range desc {
-			if c.Key == "PRI" {
-				keyCols = append(keyCols, c.Name)
-			}
-		}
-		return editPrepMsg{database: database, table: table, cols: cols, row: row, cellCol: cellCol, keyCols: keyCols}
+		return editPrepMsg{database: database, table: table, cols: cols, row: row, cellCol: cellCol, keyCols: primaryKeyCols(desc)}
 	}
 }
 
@@ -232,6 +226,19 @@ func (s dashboardScreen) cellEditView(width int) string {
 	help := styles.Hint.Render("enter run · ⌥n toggle NULL · esc cancel")
 	body := lipgloss.JoinVertical(lipgloss.Left, title, "", valueLine, "", sqlBlock, "", help)
 	return styles.OverlayBox.Render(body)
+}
+
+// primaryKeyCols returns the primary-key column names from a described table.
+// All three engines label PK columns "PRI" in DescribeTable, so this is the one
+// place the row-mutation flows (edit/delete) learn a table's identity.
+func primaryKeyCols(desc []db.Column) []string {
+	var out []string
+	for _, c := range desc {
+		if c.Key == "PRI" {
+			out = append(out, c.Name)
+		}
+	}
+	return out
 }
 
 // keyValues pulls the values of keyCols out of a row, matching by the preview's

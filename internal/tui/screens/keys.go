@@ -69,6 +69,12 @@ type KeyMap struct {
 	// for the selected cell (v3 2.1). It fires only in the results pane, so a plain
 	// letter is safe.
 	EditCell key.Binding
+
+	// InsertRow opens a generated insert form for the current table; DeleteRow
+	// removes the selected preview row after a confirm (v3 2.2). Plain letters,
+	// safe because they fire only in the browse panes.
+	InsertRow key.Binding
+	DeleteRow key.Binding
 }
 
 // Keys is the single instance every screen and the root model share.
@@ -219,5 +225,15 @@ var Keys = KeyMap{
 	EditCell: key.NewBinding(
 		key.WithKeys("u"),
 		key.WithHelp("u", "edit cell"),
+	),
+	// n inserts a new row, x deletes the selected one — plain letters that fire
+	// only in the browse panes (never while typing).
+	InsertRow: key.NewBinding(
+		key.WithKeys("n"),
+		key.WithHelp("n", "insert row"),
+	),
+	DeleteRow: key.NewBinding(
+		key.WithKeys("x"),
+		key.WithHelp("x", "delete row"),
 	),
 }
