@@ -12,6 +12,7 @@ import (
 	"github.com/Ibnu-Afdel/dbwiz/internal/db"
 	"github.com/Ibnu-Afdel/dbwiz/internal/debuglog"
 	"github.com/Ibnu-Afdel/dbwiz/internal/docker"
+	"github.com/Ibnu-Afdel/dbwiz/internal/remote"
 	"github.com/Ibnu-Afdel/dbwiz/internal/state"
 )
 
@@ -421,32 +422,91 @@ func manualContainer(name string, kind db.Kind, port int) docker.Container {
 	return docker.Container{Name: name, Engine: dockerEngineOf(kind), State: docker.StateRunning, HostPort: port}
 }
 
-// connectManualCmd opens a live engine for a saved manual target (v2 3.3). Unlike
-// connectCmd it runs no credential ladder — a manual target carries its own
-// host/port/user and DBWiz always prompts for the password — so the flow is just
-// connect, and on an auth rejection drop to the password prompt.
-func connectManualCmd(name string, kind db.Kind, base db.Target, prompted db.Target, hasPrompt bool) tea.Cmd {
+// connectManualCmd opens a live engine for a manual target (v2 3.3, v3 3.1).
+// Unlike connectCmd it runs no credential ladder — a manual target carries its
+// own host/port/user and DBWiz prompts for the password only if the server
+// rejects what was entered. When ssh is non-nil it first opens an SSH tunnel
+// (v3 3.2) and connects the driver to the tunnel's local port; the engine is
+// then wrapped so closing it also tears the tunnel down. Each attempt (including
+// a password retry) opens its own tunnel, so a rejected login never leaks one.
+func connectManualCmd(name string, kind db.Kind, base db.Target, ssh *remote.SSHSpec, prompted db.Target, hasPrompt bool) tea.Cmd {
 	return func() tea.Msg {
 		target := base
 		if hasPrompt {
 			target.Password = prompted.Password
 		}
-		engine, err := NewEngineFn(kind)
-		if err != nil {
-			return connectErrMsg{err: err}
-		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
 		defer cancel()
+
+		// Redirect the target through an SSH tunnel when one is configured.
+		var tunnel *remote.Tunnel
+		if ssh != nil {
+			tun, err := openTunnel(ctx, *ssh, base.Host, base.Port)
+			if err != nil {
+				return connectErrMsg{err: err}
+			}
+			tunnel = tun
+			target.Host = tun.LocalHost()
+			target.Port = tun.LocalPort()
+		}
+
+		engine, err := NewEngineFn(kind)
+		if err != nil {
+			closeTunnel(tunnel)
+			return connectErrMsg{err: err}
+		}
 		if err := engine.Connect(ctx, target); err != nil {
 			_ = engine.Close()
+			closeTunnel(tunnel)
 			var dberr *db.DBError
 			if errors.As(err, &dberr) && dberr.Kind == db.DBErrAuthFailed {
 				return connectAuthMsg{target: target}
 			}
 			return connectErrMsg{err: err}
 		}
-		return connectedMsg{engine: engine, target: target, container: manualContainer(name, kind, target.Port)}
+		if tunnel != nil {
+			engine = tunneledEngine{Engine: engine, tunnel: tunnel}
+		}
+		return connectedMsg{engine: engine, target: target, container: manualContainer(name, kind, base.Port)}
 	}
+}
+
+// openTunnel dials the SSH host and opens a local forward to host:port as seen
+// from that host. The returned tunnel owns the SSH client, so closing it closes
+// both.
+func openTunnel(ctx context.Context, spec remote.SSHSpec, host string, port int) (*remote.Tunnel, error) {
+	client, err := remote.Dial(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+	tun, err := client.Tunnel(host, port)
+	if err != nil {
+		_ = client.Close()
+		return nil, err
+	}
+	return tun, nil
+}
+
+func closeTunnel(t *remote.Tunnel) {
+	if t != nil {
+		_ = t.Close()
+	}
+}
+
+// tunneledEngine wraps a live engine whose connection runs over an SSH tunnel,
+// tying the tunnel's lifetime to the engine's: every Engine method is the inner
+// engine's (promoted), and Close tears down the tunnel after the connection. The
+// dashboard closes the engine on Back, so the tunnel is released the same way.
+type tunneledEngine struct {
+	db.Engine
+	tunnel *remote.Tunnel
+}
+
+func (e tunneledEngine) Close() error {
+	err := e.Engine.Close()
+	closeTunnel(e.tunnel)
+	return err
 }
 
 // loadDatabasesCmd lists the engine's databases off the Update goroutine.

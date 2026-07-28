@@ -52,6 +52,11 @@ type ManualTarget struct {
 	Port     int    `toml:"port"`
 	User     string `toml:"user"`
 	Database string `toml:"database"` // optional initial/maintenance database
+	// SSH, when set, tunnels the connection through an SSH host given as
+	// user@host[:port] (agent/key auth, v3 3.2). Host/Port above are then the
+	// database address as seen from that SSH host — usually 127.0.0.1 and the db's
+	// own port. Empty means a direct connection.
+	SSH string `toml:"ssh"`
 }
 
 // knownEngines is the set of engine strings a saved target may name. SQLite is
@@ -73,8 +78,20 @@ func (t ManualTarget) Valid() (bool, string) {
 		return false, "missing or out-of-range port"
 	case strings.TrimSpace(t.User) == "":
 		return false, "missing user"
+	case strings.TrimSpace(t.SSH) != "" && !validSSHTarget(t.SSH):
+		return false, fmt.Sprintf("ssh %q must be user@host or user@host:port", t.SSH)
 	}
 	return true, ""
+}
+
+// validSSHTarget is a light format check for the optional ssh field, keeping
+// config a leaf package. The authoritative parse (remote.ParseSSH) runs at
+// connect time; this only drops an obviously malformed saved target from the
+// menu rather than offering a dead link.
+func validSSHTarget(s string) bool {
+	s = strings.TrimSpace(s)
+	at := strings.Index(s, "@")
+	return at > 0 && at < len(s)-1
 }
 
 // Load reads and parses the config file. A missing file is not an error — it

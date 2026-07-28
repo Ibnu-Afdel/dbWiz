@@ -14,6 +14,7 @@ import (
 	"github.com/Ibnu-Afdel/dbwiz/internal/config"
 	"github.com/Ibnu-Afdel/dbwiz/internal/db"
 	"github.com/Ibnu-Afdel/dbwiz/internal/docker"
+	"github.com/Ibnu-Afdel/dbwiz/internal/remote"
 	"github.com/Ibnu-Afdel/dbwiz/internal/tui/styles"
 )
 
@@ -36,11 +37,13 @@ type connectScreen struct {
 
 	// Manual (saved, non-Docker) target support (v2 3.3). When manual is set the
 	// screen skips the container credential ladder and connects straight to
-	// manualBase (host/port/user from config), prompting for the password.
+	// manualBase (host/port/user from config), prompting for the password. manualSSH,
+	// when non-nil, first opens an SSH tunnel and connects through it (v3 3.2).
 	manual     bool
 	manualName string
 	manualKind db.Kind
 	manualBase db.Target
+	manualSSH  *remote.SSHSpec
 
 	spinner spinner.Model
 	input   textinput.Model
@@ -75,20 +78,30 @@ func NewConnectManual(mt config.ManualTarget) Screen {
 	if !ok {
 		kind = db.KindPostgres
 	}
-	return NewConnectManualEntry(mt.Name, kind, db.Target{Host: mt.Host, Port: mt.Port, User: mt.User, Database: mt.Database})
+	// A saved target's ssh string is format-checked by config.Valid, so a parse
+	// error here is unexpected; on one, connect directly rather than fail to open.
+	var spec *remote.SSHSpec
+	if mt.SSH != "" {
+		if s, err := remote.ParseSSH(mt.SSH); err == nil {
+			spec = &s
+		}
+	}
+	return NewConnectManualEntry(mt.Name, kind, db.Target{Host: mt.Host, Port: mt.Port, User: mt.User, Database: mt.Database}, spec)
 }
 
 // NewConnectManualEntry starts connecting to a manual (non-Docker) target the
 // caller has fully specified — the interactive host/port form (v3 3.1) or a saved
 // target (v2 3.3). base may already carry a password (from the form); if it does
 // and the server accepts it, the user never sees the prompt, otherwise the screen
-// drops to the masked prompt as usual.
-func NewConnectManualEntry(name string, kind db.Kind, base db.Target) Screen {
+// drops to the masked prompt as usual. When ssh is non-nil the connection is
+// tunnelled through it (v3 3.2).
+func NewConnectManualEntry(name string, kind db.Kind, base db.Target, ssh *remote.SSHSpec) Screen {
 	s := baseConnect()
 	s.manual = true
 	s.manualName = name
 	s.manualKind = kind
 	s.manualBase = base
+	s.manualSSH = ssh
 	// A synthetic container so the spinner/prompt text and the dashboard label read
 	// the target's name like any other connection.
 	s.container = manualContainer(name, kind, base.Port)
@@ -113,6 +126,7 @@ func (s connectScreen) fresh() Screen {
 	r := baseConnect()
 	r.container, r.create = s.container, s.create
 	r.manual, r.manualName, r.manualKind, r.manualBase = s.manual, s.manualName, s.manualKind, s.manualBase
+	r.manualSSH = s.manualSSH
 	return r
 }
 
@@ -124,7 +138,7 @@ func (s connectScreen) Init() tea.Cmd {
 // targets, the container credential ladder otherwise.
 func (s connectScreen) attempt(prompted db.Target, hasPrompt bool) tea.Cmd {
 	if s.manual {
-		return connectManualCmd(s.manualName, s.manualKind, s.manualBase, prompted, hasPrompt)
+		return connectManualCmd(s.manualName, s.manualKind, s.manualBase, s.manualSSH, prompted, hasPrompt)
 	}
 	return connectCmd(s.container, prompted, hasPrompt)
 }

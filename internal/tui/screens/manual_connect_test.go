@@ -104,6 +104,53 @@ func TestManualConnectSubmitPushesConnect(t *testing.T) {
 	}
 }
 
+// fillToSSH builds a filled form focused on the SSH field, ready to type a tunnel
+// spec. Each call is a fresh screen (formModel.fields is a shared slice, so
+// screens must not be reused across sub-cases).
+func fillToSSH() manualConnectScreen {
+	s := NewManualConnect().(manualConnectScreen)
+	s = typeManual(s, "127.0.0.1") // host
+	s = tab(s)
+	s = typeManual(s, "5432") // port
+	s = tab(s)
+	s = typeManual(s, "postgres") // user
+	s = tab(s)                    // password
+	s = tab(s)                    // database
+	s = tab(s)                    // ssh
+	return s
+}
+
+// TestManualConnectSSH a valid SSH host is parsed and threaded into the pushed
+// connect screen; a malformed one blocks submit.
+func TestManualConnectSSH(t *testing.T) {
+	// Malformed (bad port): submit stays inert.
+	bad := typeManual(fillToSSH(), "deploy@host:99999")
+	if err, _ := bad.form.validate(bad.form); err == "" {
+		t.Error("malformed SSH should be rejected")
+	}
+	if _, cmd := bad.Update(tea.KeyPressMsg{Code: tea.KeyEnter}); cmd != nil {
+		t.Error("enter with a malformed SSH should not connect")
+	}
+
+	// Valid: the pushed connect screen carries the parsed spec.
+	good := typeManual(fillToSSH(), "deploy@10.0.0.5:2222")
+	_, cmd := good.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("valid form should connect")
+	}
+	push, ok := cmd().(PushMsg)
+	if !ok {
+		t.Fatalf("want PushMsg, got %T", cmd())
+	}
+	cs := push.Screen.(connectScreen)
+	if cs.manualSSH == nil {
+		t.Fatal("manualSSH not set")
+	}
+	if cs.manualSSH.User != "deploy" || cs.manualSSH.Host != "10.0.0.5" || cs.manualSSH.Port != 2222 {
+		t.Errorf("manualSSH = %+v", *cs.manualSSH)
+	}
+}
+
 // TestManualConnectCancel esc pops back to the home menu.
 func TestManualConnectCancel(t *testing.T) {
 	s := NewManualConnect()

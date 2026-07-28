@@ -106,6 +106,8 @@ func TestValidAndValidTargets(t *testing.T) {
 		{ManualTarget{Name: "n", Engine: "mysql", Host: "", Port: 3306, User: "u"}, false},
 		{ManualTarget{Name: "n", Engine: "mysql", Host: "h", Port: 0, User: "u"}, false},
 		{ManualTarget{Name: "n", Engine: "mysql", Host: "h", Port: 3306, User: ""}, false},
+		{ManualTarget{Name: "ssh-ok", Engine: "postgres", Host: "127.0.0.1", Port: 5432, User: "u", SSH: "deploy@1.2.3.4"}, true},
+		{ManualTarget{Name: "ssh-bad", Engine: "postgres", Host: "127.0.0.1", Port: 5432, User: "u", SSH: "no-at-sign"}, false},
 	}
 	valid := 0
 	c := Config{}

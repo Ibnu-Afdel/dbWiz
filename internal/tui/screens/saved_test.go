@@ -103,7 +103,7 @@ func TestConnectManualCmd(t *testing.T) {
 	t.Cleanup(func() { NewEngineFn = old })
 
 	base := db.Target{Host: "h", Port: 5432, User: "u", Database: "app"}
-	msg := runCmd(t, connectManualCmd("prod", db.KindPostgres, base, db.Target{Password: "pw"}, true))
+	msg := runCmd(t, connectManualCmd("prod", db.KindPostgres, base, nil, db.Target{Password: "pw"}, true))
 	c, ok := msg.(connectedMsg)
 	if !ok {
 		t.Fatalf("want connectedMsg, got %T", msg)

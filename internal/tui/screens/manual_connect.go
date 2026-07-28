@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 
 	"github.com/Ibnu-Afdel/dbwiz/internal/db"
+	"github.com/Ibnu-Afdel/dbwiz/internal/remote"
 )
 
 // manualConnectScreen collects a host/port/user/password/database by hand and
@@ -44,9 +45,13 @@ func NewManualConnect() Screen {
 	dbn.Prompt = "› "
 	dbn.Placeholder = "(optional — defaults to the engine's maintenance db)"
 
+	sshIn := textinput.New()
+	sshIn.Prompt = "› "
+	sshIn.Placeholder = "(optional — user@host to tunnel through, e.g. deploy@1.2.3.4)"
+
 	f := formModel{
 		title:  "Connect by host and port",
-		note:   "For any reachable Postgres, MySQL, or MariaDB — no Docker needed. This connection isn't saved; add a [[target]] to config.toml to keep it.",
+		note:   "For any reachable Postgres, MySQL, or MariaDB — no Docker needed. With an SSH host set, Host/Port are the database as seen from that host (usually 127.0.0.1). This connection isn't saved; add a [[target]] to config.toml to keep it.",
 		submit: "connect",
 		fields: []formField{
 			{key: "engine", label: "Engine", kind: fieldChoice, choices: []string{"postgres", "mysql", "mariadb"}},
@@ -55,6 +60,7 @@ func NewManualConnect() Screen {
 			{key: "user", label: "User", kind: fieldText, input: user},
 			{key: "password", label: "Password", kind: fieldText, input: pass},
 			{key: "database", label: "Database", kind: fieldText, input: dbn},
+			{key: "ssh", label: "SSH tunnel", kind: fieldText, input: sshIn},
 		},
 		validate: validateManualConnect,
 	}
@@ -89,8 +95,8 @@ func (s manualConnectScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	return s, cmd
 }
 
-// connect turns the completed form into a manual connect. Engine and port are
-// already validated, so mapping/parsing them is expected to succeed.
+// connect turns the completed form into a manual connect. Engine, port, and any
+// SSH host are already validated, so mapping/parsing them is expected to succeed.
 func (s manualConnectScreen) connect() tea.Cmd {
 	kind, ok := manualKind(s.form.choice("engine"))
 	if !ok {
@@ -104,7 +110,13 @@ func (s manualConnectScreen) connect() tea.Cmd {
 		Password: s.form.value("password"),
 		Database: s.form.value("database"),
 	}
-	return Push(NewConnectManualEntry(base.Host, kind, base))
+	var ssh *remote.SSHSpec
+	if raw := s.form.value("ssh"); raw != "" {
+		if spec, err := remote.ParseSSH(raw); err == nil {
+			ssh = &spec
+		}
+	}
+	return Push(NewConnectManualEntry(base.Host, kind, base, ssh))
 }
 
 func (s manualConnectScreen) View(width, height int) string {
@@ -131,6 +143,11 @@ func validateManualConnect(f formModel) (errText, warnText string) {
 	}
 	if f.value("user") == "" {
 		return "enter a user", ""
+	}
+	if raw := f.value("ssh"); raw != "" {
+		if _, err := remote.ParseSSH(raw); err != nil {
+			return "SSH tunnel must be user@host or user@host:port", ""
+		}
 	}
 	if f.value("password") == "" {
 		return "", "no password entered — DBWiz will try without one, then prompt if it's needed"
