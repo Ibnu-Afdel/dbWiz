@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
 
+	"github.com/Ibnu-Afdel/dbwiz/internal/config"
 	"github.com/Ibnu-Afdel/dbwiz/internal/db"
 	"github.com/Ibnu-Afdel/dbwiz/internal/docker"
 	"github.com/Ibnu-Afdel/dbwiz/internal/tui/styles"
@@ -33,6 +34,14 @@ type connectScreen struct {
 	mode      connectMode
 	create    bool // land on the create-database form instead of the browser (Step 6.7)
 
+	// Manual (saved, non-Docker) target support (v2 3.3). When manual is set the
+	// screen skips the container credential ladder and connects straight to
+	// manualBase (host/port/user from config), prompting for the password.
+	manual     bool
+	manualName string
+	manualKind db.Kind
+	manualBase db.Target
+
 	spinner spinner.Model
 	input   textinput.Model
 
@@ -50,6 +59,33 @@ func NewConnect(c docker.Container) Screen { return newConnect(c, false) }
 func NewConnectCreating(c docker.Container) Screen { return newConnect(c, true) }
 
 func newConnect(c docker.Container, create bool) Screen {
+	s := baseConnect()
+	s.container = c
+	s.create = create
+	return s
+}
+
+// NewConnectManual starts connecting to a saved manual target (v2 3.3). The
+// engine string is already validated by config, so mapping it is expected to
+// succeed; an unknown engine falls back to Postgres rather than failing to open
+// the screen.
+func NewConnectManual(mt config.ManualTarget) Screen {
+	kind, ok := manualKind(mt.Engine)
+	if !ok {
+		kind = db.KindPostgres
+	}
+	s := baseConnect()
+	s.manual = true
+	s.manualName = mt.Name
+	s.manualKind = kind
+	s.manualBase = db.Target{Host: mt.Host, Port: mt.Port, User: mt.User, Database: mt.Database}
+	// A synthetic container so the spinner/prompt text and the dashboard label read
+	// the target's name like any other connection.
+	s.container = manualContainer(mt.Name, kind, mt.Port)
+	return s
+}
+
+func baseConnect() connectScreen {
 	sp := spinner.New(spinner.WithSpinner(spinner.Dot))
 	sp.Style = styles.Selected
 
@@ -58,11 +94,29 @@ func newConnect(c docker.Container, create bool) Screen {
 	in.Prompt = "Password: "
 	in.Placeholder = "password"
 
-	return connectScreen{container: c, mode: modeConnecting, create: create, spinner: sp, input: in}
+	return connectScreen{mode: modeConnecting, spinner: sp, input: in}
+}
+
+// fresh rebuilds a clean connect screen of the same kind (manual or container),
+// so a retry from the error screen restarts the right flow.
+func (s connectScreen) fresh() Screen {
+	r := baseConnect()
+	r.container, r.create = s.container, s.create
+	r.manual, r.manualName, r.manualKind, r.manualBase = s.manual, s.manualName, s.manualKind, s.manualBase
+	return r
 }
 
 func (s connectScreen) Init() tea.Cmd {
-	return tea.Batch(s.spinner.Tick, connectCmd(s.container, db.Target{}, false))
+	return tea.Batch(s.spinner.Tick, s.attempt(db.Target{}, false))
+}
+
+// attempt is the connect command for this screen — the manual path for saved
+// targets, the container credential ladder otherwise.
+func (s connectScreen) attempt(prompted db.Target, hasPrompt bool) tea.Cmd {
+	if s.manual {
+		return connectManualCmd(s.manualName, s.manualKind, s.manualBase, prompted, hasPrompt)
+	}
+	return connectCmd(s.container, prompted, hasPrompt)
 }
 
 // CapturesText is true while the masked password prompt is up, so a digit typed
@@ -74,7 +128,11 @@ func (s connectScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	case connectedMsg:
 		// Remember this container so a later launch can offer to continue here
 		// (v2 Step 1.2). Best-effort: a cache write must never block connecting.
-		rememberDocker(msg.container)
+		// Manual targets aren't Docker containers, so they aren't remembered as a
+		// continue target (the state cache models only Docker/SQLite).
+		if !s.manual {
+			rememberDocker(msg.container)
+		}
 		if s.create {
 			return s, Replace(NewDashboardCreating(msg.engine, msg.target, msg.container))
 		}
@@ -91,7 +149,7 @@ func (s connectScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	case connectErrMsg:
 		return s, Replace(NewErrorFromDB(asDBError(msg.err), retrySpec{
 			label: "retry",
-			cmd:   Replace(newConnect(s.container, s.create)),
+			cmd:   Replace(s.fresh()),
 		}))
 	case spinner.TickMsg:
 		if s.mode != modeConnecting {
@@ -117,7 +175,7 @@ func (s connectScreen) updatePrompt(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		s.submitted = true
 		s.mode = modeConnecting
 		s.errMsg = ""
-		return s, tea.Batch(s.spinner.Tick, connectCmd(s.container, s.target, true))
+		return s, tea.Batch(s.spinner.Tick, s.attempt(s.target, true))
 	}
 	var cmd tea.Cmd
 	s.input, cmd = s.input.Update(msg)

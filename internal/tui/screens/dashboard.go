@@ -2,6 +2,7 @@ package screens
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -35,11 +36,15 @@ const (
 type adminMode int
 
 const (
-	modeBrowse  adminMode = iota // the three-pane browser
-	modeForm                     // a create form (database or user)
-	modeConfirm                  // a type-the-name destructive confirm
-	modeGrant                    // the grant/revoke picker
-	modeCell                     // the results cell-detail overlay (full value)
+	modeBrowse   adminMode = iota // the three-pane browser
+	modeForm                      // a create form (database or user)
+	modeConfirm                   // a type-the-name destructive confirm
+	modeGrant                     // the grant/revoke picker
+	modeCell                      // the results cell-detail overlay (full value)
+	modeHistory                   // the searchable per-target query-history picker (v2 2.1)
+	modeSaved                     // the searchable saved/favourite-query picker (v2 2.2)
+	modeExport                    // the CSV/JSON results-export chooser (v2 2.3)
+	modeComplete                  // the schema-aware autocomplete picker (v2 2.5)
 )
 
 // formPurpose records which create command a submitted form should run.
@@ -48,6 +53,8 @@ type formPurpose int
 const (
 	purposeCreateDB formPurpose = iota
 	purposeCreateUser
+	purposeEditUser  // v2 3.2: edit an existing user's flags/password
+	purposeSaveQuery // v2 2.2: name the editor's statement as a saved query
 )
 
 // confirmKind records which destructive command an accepted confirm should run.
@@ -108,6 +115,7 @@ type dashboardScreen struct {
 	mode           adminMode
 	form           formModel
 	formPurpose    formPurpose
+	editUserName   string // subject of an open edit-user form (v2 3.2)
 	confirm        confirmModel
 	confirmKind    confirmKind
 	confirmTarget  string
@@ -153,6 +161,33 @@ type dashboardScreen struct {
 	queryVerb   string
 	history     []string
 	historyIdx  int
+	// historyKey identifies this target in the cross-session history store; it is
+	// the key both the seed (in NewDashboard) and every persist write use so the
+	// same connection accumulates one history across sessions (v2 Step 2.1).
+	historyKey string
+	// historyList is the searchable/fuzzy-filtered overlay opened with alt+h
+	// (modeHistory). It is (re)built from the store each time it opens.
+	historyList historyModel
+	// savedList is the searchable saved/favourite-query picker opened with alt+s
+	// (modeSaved), rebuilt from the store each time it opens (v2 2.2).
+	savedList savedModel
+	// export is the CSV/JSON chooser opened with alt+e over the current results
+	// grid (modeExport, v2 2.3).
+	export exportModel
+	// vim is the modal-editor state (v2 2.4): enabled from config, plus the current
+	// mode. Off by default, in which case the editor never intercepts keys.
+	vim vimState
+
+	// columnCache maps a table name to its column names, warmed as the user
+	// previews or describes tables. It's the "cached metadata" the editor's
+	// schema-aware autocomplete draws on (v2 2.5) — no extra queries, just what
+	// browsing already fetched. completeList is the completion picker overlay
+	// (modeComplete); completeLine/Start/End mark the word-prefix it will replace.
+	columnCache   map[string][]string
+	completeList  completeModel
+	completeLine  int
+	completeStart int
+	completeEnd   int
 
 	// Per-pane async state. A load sets its loading flag; the reply clears it or
 	// sets its err. Errors render inside the pane with an [R] retry, never
@@ -174,6 +209,7 @@ func NewDashboard(engine db.Engine, target db.Target, c docker.Container) Screen
 	sp := spinner.New(spinner.WithSpinner(spinner.Dot))
 	sp.Style = styles.Selected
 
+	key := historyKeyFor(c, target)
 	s := dashboardScreen{
 		engine:     engine,
 		target:     target,
@@ -183,6 +219,13 @@ func NewDashboard(engine db.Engine, target db.Target, c docker.Container) Screen
 		currentDB:  target.Database,
 		editor:     newSQLEditor(),
 		historyIdx: -1,
+		historyKey: key,
+		// The modal editor reads the shared config preference (v2 2.4); off by
+		// default, in which case it behaves exactly like the plain textarea.
+		vim: newVimState(vimEditor),
+		// Seed the in-memory cycle ring from the persisted store so ctrl+p/ctrl+n
+		// recall this target's past statements immediately on reconnect (v2 2.1).
+		history: seedHistory(key),
 	}
 	// The loading flags are set here, not in Init: Init runs on a value copy, so
 	// flags set there wouldn't reach the stored model and the spinner would never
@@ -211,6 +254,15 @@ func (s dashboardScreen) Title() string { return s.container.Name }
 func (s dashboardScreen) CapturesText() bool {
 	if s.mode == modeForm || s.mode == modeConfirm {
 		return true
+	}
+	if s.mode == modeHistory {
+		return s.historyList.settingFilter()
+	}
+	if s.mode == modeSaved {
+		return s.savedList.settingFilter()
+	}
+	if s.mode == modeComplete {
+		return s.completeList.settingFilter()
 	}
 	return s.mode == modeBrowse && s.focus == focusEditor
 }
@@ -291,6 +343,7 @@ func (s dashboardScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		s.resLoading, s.resErr = false, nil
 		s.results, s.preview, s.resultOffset, s.colOffset = resultsRows, msg.result, 0, 0
 		s.cellRow, s.cellCol = 0, 0
+		s.cacheColumns(msg.table, msg.result.Columns) // warm autocomplete (v2 2.5)
 		return s, nil
 	case rowsErrMsg:
 		if !s.isCurrentTable(msg.database, msg.table) {
@@ -306,6 +359,7 @@ func (s dashboardScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		s.resLoading, s.resErr = false, nil
 		s.results, s.columns, s.resultOffset, s.colOffset = resultsDescribe, msg.columns, 0, 0
 		s.cellRow, s.cellCol = 0, 0
+		s.cacheColumnDefs(msg.table, msg.columns) // warm autocomplete (v2 2.5)
 		return s, nil
 	case describeErrMsg:
 		if !s.isCurrentTable(msg.database, msg.table) {
@@ -333,10 +387,56 @@ func (s dashboardScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	case openCreateDBMsg:
 		return s.openCreateDB()
 
+	case grantsLoadedMsg:
+		// Only apply if the matrix is still open on the same user+database.
+		if s.mode == modeGrant && msg.user == s.grant.subject && msg.database == s.grant.database {
+			s.grant = s.grant.setHeld(msg.held)
+		}
+		return s, nil
+	case grantsErrMsg:
+		if s.mode == modeGrant && msg.user == s.grant.subject && msg.database == s.grant.database {
+			s.grant = s.grant.setErr(msg.err)
+		}
+		return s, nil
+	case grantSetMsg:
+		if s.mode == modeGrant && msg.user == s.grant.subject && msg.database == s.grant.database {
+			verb := "Granted"
+			if !msg.grant {
+				verb = "Revoked"
+			}
+			s.notice, s.noticeErr = verb+" "+string(msg.priv)+" on "+msg.database+" for "+msg.user, false
+			// Refresh the matrix from the server so the checkmarks reflect reality.
+			return s, loadGrantsCmd(s.engine, msg.user, msg.database)
+		}
+		return s, nil
+
 	case queryDoneMsg:
 		return s.applyQueryDone(msg)
 	case queryErrMsg:
 		return s.applyQueryErr(msg)
+
+	case exportDoneMsg:
+		s.notice, s.noticeErr = fmt.Sprintf("Exported %d rows to %s", msg.rows, msg.path), false
+		return s, nil
+	case exportErrMsg:
+		s.notice, s.noticeErr = "Export failed: "+msg.err.Error(), true
+		return s, nil
+
+	case savedDeletedMsg:
+		// A delete from the saved picker resolved: rebuild the overlay from the
+		// refreshed list, or close it (with a notice) when nothing is left. Ignore
+		// if the overlay has since closed.
+		if s.mode != modeSaved {
+			return s, nil
+		}
+		if len(msg.items) == 0 {
+			s.mode = modeBrowse
+			s.notice, s.noticeErr = "Saved queries are now empty.", false
+			return s, nil
+		}
+		w, h := s.savedOverlaySize()
+		s.savedList = newSavedModel(msg.items, w, h)
+		return s, nil
 
 	case tea.KeyPressMsg:
 		return s.handleKey(msg)
@@ -368,6 +468,18 @@ func (s dashboardScreen) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s, Pop()
 	case key.Matches(msg, Keys.Edit):
 		return s.focusEditor()
+	case key.Matches(msg, Keys.HistoryList):
+		return s.openHistory()
+	case key.Matches(msg, Keys.SavedList):
+		return s.openSaved()
+	case key.Matches(msg, Keys.SaveQuery):
+		return s.openSaveQuery()
+	case key.Matches(msg, Keys.Export):
+		return s.openExport()
+	case key.Matches(msg, Keys.CopyCell):
+		return s.copyCell()
+	case key.Matches(msg, Keys.CopyRow):
+		return s.copyRow()
 	case key.Matches(msg, Keys.Focus):
 		s.focus = s.nextFocus()
 		return s, s.syncEditorFocus()
@@ -395,6 +507,8 @@ func (s dashboardScreen) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s.openDelete()
 	case key.Matches(msg, Keys.Grant):
 		return s.openGrant()
+	case key.Matches(msg, Keys.EditUser):
+		return s.openEditUser()
 	}
 	return s, nil
 }
@@ -535,14 +649,42 @@ func (s dashboardScreen) Help() []key.Binding {
 			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "scroll")),
 			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close")),
 		}
+	case modeHistory:
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
+			Keys.Up, Keys.Down,
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "load")),
+			Keys.Back,
+		}
+	case modeSaved:
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
+			Keys.Up, Keys.Down,
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "load")),
+			key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
+			Keys.Back,
+		}
+	case modeExport:
+		return []key.Binding{
+			Keys.Up, Keys.Down,
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "export")),
+			Keys.Back,
+		}
+	case modeComplete:
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
+			Keys.Up, Keys.Down,
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "insert")),
+			Keys.Back,
+		}
 	}
 	// A running statement can only be cancelled.
 	if s.querying {
 		return []key.Binding{Keys.Cancel}
 	}
-	// The editor advertises its own run/history keys.
+	// The editor advertises its own run/history/saved/complete keys.
 	if s.focus == focusEditor {
-		return []key.Binding{Keys.Run, Keys.History, Keys.Focus, Keys.Back}
+		return []key.Binding{Keys.Run, Keys.Complete, Keys.History, Keys.HistoryList, Keys.SaveQuery, Keys.SavedList, Keys.Focus, Keys.Back}
 	}
 	b := []key.Binding{Keys.Focus, Keys.Up, Keys.Down}
 	switch s.focus {
@@ -551,14 +693,15 @@ func (s dashboardScreen) Help() []key.Binding {
 	case focusTables:
 		b = append(b, Keys.Select, Keys.Info)
 	case focusUsers:
-		b = append(b, Keys.Create, Keys.Delete, Keys.Grant)
+		b = append(b, Keys.Create, Keys.Delete, Keys.Grant, Keys.EditUser)
 	case focusResults:
 		b = append(b,
 			key.NewBinding(key.WithKeys("left", "right"), key.WithHelp("←/→", "columns")),
 			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "inspect cell")),
+			Keys.CopyCell, Keys.CopyRow, Keys.Export,
 		)
 	}
-	b = append(b, Keys.Edit, Keys.Refresh, Keys.Back)
+	b = append(b, Keys.Edit, Keys.HistoryList, Keys.SavedList, Keys.Refresh, Keys.Back)
 	return b
 }
 

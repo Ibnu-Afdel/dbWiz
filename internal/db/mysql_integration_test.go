@@ -97,6 +97,42 @@ func TestMyDatabasesAdminBrowseQuery(t *testing.T) {
 	if err := e.Revoke(ctx, user, name, GrantAll); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
+
+	// Per-privilege matrix (v2 3.1): grant SELECT+INSERT on the schema, confirm
+	// ListGrants reflects exactly those, then revoke SELECT and confirm only
+	// INSERT remains.
+	if err := e.SetGrant(ctx, user, name, PrivSelect, true); err != nil {
+		t.Fatalf("SetGrant SELECT: %v", err)
+	}
+	if err := e.SetGrant(ctx, user, name, PrivInsert, true); err != nil {
+		t.Fatalf("SetGrant INSERT: %v", err)
+	}
+	held, err := e.ListGrants(ctx, user, name)
+	if err != nil {
+		t.Fatalf("ListGrants: %v", err)
+	}
+	if !containsPriv(held, PrivSelect) || !containsPriv(held, PrivInsert) {
+		t.Errorf("after granting SELECT+INSERT, ListGrants = %v", held)
+	}
+	if err := e.SetGrant(ctx, user, name, PrivSelect, false); err != nil {
+		t.Fatalf("SetGrant revoke SELECT: %v", err)
+	}
+	held, _ = e.ListGrants(ctx, user, name)
+	if containsPriv(held, PrivSelect) || !containsPriv(held, PrivInsert) {
+		t.Errorf("after revoking SELECT, ListGrants = %v, want only INSERT", held)
+	}
+	if err := e.SetGrant(ctx, user, name, Privilege("SELECT, DROP"), true); err == nil {
+		t.Error("SetGrant should reject a privilege outside the engine's set")
+	}
+
+	// Password change works; role flags do not exist on MySQL (v2 3.2).
+	if err := e.SetPassword(ctx, user, "newpw456"); err != nil {
+		t.Fatalf("SetPassword: %v", err)
+	}
+	if err := e.AlterUser(ctx, user, true, true); err == nil {
+		t.Error("MySQL AlterUser should be unsupported (no role flags)")
+	}
+
 	if users, err := e.ListUsers(ctx); err != nil || !hasUser(users, user) {
 		t.Fatalf("ListUsers missing %q (err=%v)", user, err)
 	}

@@ -43,9 +43,25 @@ type fakeEngine struct {
 	lastCreateUser string
 	lastDropDB     string
 	lastDropUser   string
+	lastAlterUser  string
+	lastAlterLogin bool
+	lastAlterCDB   bool
+	lastPwUser     string
+	lastPwValue    string
 	lastGrantUser  string
 	lastGrantDB    string
 	lastGranted    bool // true = Grant, false = Revoke
+
+	// Grant matrix (v2 3.1). privileges is the column set DatabasePrivileges
+	// reports; grants holds each user's currently-held privileges per database,
+	// keyed user+"\x00"+database, and SetGrant mutates it so a test can toggle and
+	// re-read. lastSet* records the most recent SetGrant call.
+	privileges   []db.Privilege
+	grants       map[string][]db.Privilege
+	lastSetUser  string
+	lastSetDB    string
+	lastSetPriv  db.Privilege
+	lastSetGrant bool
 }
 
 func (f *fakeEngine) Kind() db.Kind {
@@ -112,6 +128,43 @@ func (f *fakeEngine) Revoke(_ context.Context, user, database string, _ db.Grant
 	f.lastGrantUser, f.lastGrantDB, f.lastGranted = user, database, false
 	return nil
 }
+func (f *fakeEngine) AlterUser(_ context.Context, name string, canLogin, createDB bool) error {
+	f.lastAlterUser, f.lastAlterLogin, f.lastAlterCDB = name, canLogin, createDB
+	return nil
+}
+func (f *fakeEngine) SetPassword(_ context.Context, name, password string) error {
+	f.lastPwUser, f.lastPwValue = name, password
+	return nil
+}
+func (f *fakeEngine) DatabasePrivileges() []db.Privilege    { return f.privileges }
+func (f *fakeEngine) grantKey(user, database string) string { return user + "\x00" + database }
+func (f *fakeEngine) ListGrants(_ context.Context, user, database string) ([]db.Privilege, error) {
+	return f.grants[f.grantKey(user, database)], nil
+}
+func (f *fakeEngine) SetGrant(_ context.Context, user, database string, priv db.Privilege, grant bool) error {
+	f.lastSetUser, f.lastSetDB, f.lastSetPriv, f.lastSetGrant = user, database, priv, grant
+	if f.grants == nil {
+		f.grants = map[string][]db.Privilege{}
+	}
+	key := f.grantKey(user, database)
+	var out []db.Privilege
+	found := false
+	for _, p := range f.grants[key] {
+		if p == priv {
+			found = true
+			if grant {
+				out = append(out, p) // already held; a re-grant is a no-op
+			}
+			continue
+		}
+		out = append(out, p)
+	}
+	if grant && !found {
+		out = append(out, priv)
+	}
+	f.grants[key] = out
+	return nil
+}
 func (f *fakeEngine) Query(_ context.Context, sql string) (db.Result, error) {
 	f.lastQuery = sql
 	if f.queryErr != nil {
@@ -124,13 +177,14 @@ func (f *fakeEngine) Query(_ context.Context, sql string) (db.Result, error) {
 // and a couple of tables in each.
 func pgEngine() *fakeEngine {
 	return &fakeEngine{
-		caps:      db.Capabilities{Users: true, Grants: true, MultipleDatabases: true},
-		databases: []db.Database{{Name: "postgres"}, {Name: "appdb"}},
+		caps:       db.Capabilities{Users: true, Grants: true, MultipleDatabases: true, RoleFlags: true},
+		privileges: []db.Privilege{db.PrivConnect, db.PrivCreate, db.PrivTemporary},
+		databases:  []db.Database{{Name: "postgres"}, {Name: "appdb"}},
 		tables: map[string][]db.Table{
 			"postgres": {{Name: "pg_stat", Rows: -1}},
 			"appdb":    {{Name: "users", Rows: 12}, {Name: "orders", Rows: 3}},
 		},
-		users: []db.User{{Name: "alice"}, {Name: "bob"}},
+		users: []db.User{{Name: "alice", CanLogin: true}, {Name: "bob", CanLogin: true}},
 		preview: db.Result{
 			Columns: []string{"id", "email"},
 			Rows:    [][]any{{"1", "a@x.io"}, {"2", nil}},
@@ -146,6 +200,9 @@ func pgEngine() *fakeEngine {
 // its initial loads already resolved, ready for interaction.
 func newPGDashboard(t *testing.T) (dashboardScreen, *fakeEngine) {
 	t.Helper()
+	// Isolate the persisted history store (v2 2.1) so NewDashboard's seed read and
+	// any run's persist write never touch the developer's real ~/.local/state.
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	eng := pgEngine()
 	s := NewDashboard(eng, db.Target{Host: "127.0.0.1", Port: 5432, Database: "postgres"},
 		docker.Container{Name: "fawz-postgres", Engine: docker.EnginePostgres}).(dashboardScreen)
@@ -482,6 +539,7 @@ func TestDashboardBackClosesEngine(t *testing.T) {
 // TestDashboardSQLiteMode covers Step 5.4: SQLite has no databases pane, focus
 // starts on tables and skips databases, and the status bar shows no db context.
 func TestDashboardSQLiteMode(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir()) // isolate the history store (v2 2.1)
 	eng := &fakeEngine{
 		caps:   db.Capabilities{}, // all false
 		tables: map[string][]db.Table{"": {{Name: "notes", Rows: 5}}},

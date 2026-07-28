@@ -37,15 +37,33 @@ type KeyMap struct {
 	Refresh key.Binding // reload the focused list
 
 	// Admin actions.
-	Create key.Binding // create a database/user (by focused section)
-	Delete key.Binding // delete the selected database/user (type-to-confirm)
-	Grant  key.Binding // grant/revoke a user on a database
+	Create   key.Binding // create a database/user (by focused section)
+	Delete   key.Binding // delete the selected database/user (type-to-confirm)
+	Grant    key.Binding // grant/revoke a user on a database
+	EditUser key.Binding // edit the selected user's flags/password (v2 3.2)
 
 	// Query pillar.
 	Edit    key.Binding // focus the SQL editor from anywhere on the dashboard
 	Run     key.Binding // execute the statement in the editor
 	Cancel  key.Binding // cancel a running query
 	History key.Binding // cycle previous statements into the editor
+	// HistoryList opens the searchable/fuzzy-filtered per-target history overlay
+	// (v2 2.1). Distinct from History's blind ctrl+p/ctrl+n cycle.
+	HistoryList key.Binding
+	// SaveQuery names the editor's statement as a saved/favourite query; SavedList
+	// opens the searchable saved-query picker (v2 2.2).
+	SaveQuery key.Binding
+	SavedList key.Binding
+
+	// Results export / clipboard (v2 2.3). Export opens the CSV/JSON file chooser;
+	// CopyCell / CopyRow yank the selected cell or row to the clipboard (OSC 52).
+	Export   key.Binding
+	CopyCell key.Binding
+	CopyRow  key.Binding
+
+	// Complete opens schema-aware autocomplete for the word under the cursor in the
+	// SQL editor (v2 2.5).
+	Complete key.Binding
 }
 
 // Keys is the single instance every screen and the root model share.
@@ -128,6 +146,10 @@ var Keys = KeyMap{
 		key.WithKeys("g"),
 		key.WithHelp("g", "grant"),
 	),
+	EditUser: key.NewBinding(
+		key.WithKeys("a"),
+		key.WithHelp("a", "edit user"),
+	),
 	Edit: key.NewBinding(
 		key.WithKeys("e"),
 		key.WithHelp("e", "edit SQL"),
@@ -147,5 +169,44 @@ var Keys = KeyMap{
 	History: key.NewBinding(
 		key.WithKeys("ctrl+p", "ctrl+n"),
 		key.WithHelp("^p/^n", "history"),
+	),
+	// alt+h so it survives being pressed mid-typing in the SQL editor (a plain
+	// letter would just insert text); it opens the searchable history list.
+	HistoryList: key.NewBinding(
+		key.WithKeys("alt+h"),
+		key.WithHelp("⌥h", "search history"),
+	),
+	// alt+w / alt+s mirror alt+h: modifier combos so they work while typing in the
+	// editor. alt+w ("write") saves the current statement; alt+s opens the saved
+	// list. ctrl+s is deliberately avoided — many terminals read it as XOFF and
+	// freeze the display.
+	SaveQuery: key.NewBinding(
+		key.WithKeys("alt+w"),
+		key.WithHelp("⌥w", "save query"),
+	),
+	SavedList: key.NewBinding(
+		key.WithKeys("alt+s"),
+		key.WithHelp("⌥s", "saved queries"),
+	),
+	// alt+e opens the export chooser from anywhere (modifier combo so it's reachable
+	// even while the editor has focus). y/Y yank the selected cell/row; they're
+	// plain letters because they only fire in the results pane, never while typing.
+	Export: key.NewBinding(
+		key.WithKeys("alt+e"),
+		key.WithHelp("⌥e", "export"),
+	),
+	CopyCell: key.NewBinding(
+		key.WithKeys("y"),
+		key.WithHelp("y", "copy cell"),
+	),
+	CopyRow: key.NewBinding(
+		key.WithKeys("Y"),
+		key.WithHelp("Y", "copy row"),
+	),
+	// ctrl+space is the conventional completion trigger and survives multiplexers;
+	// it can't clash with typed text or a vim normal-mode letter.
+	Complete: key.NewBinding(
+		key.WithKeys("ctrl+space"),
+		key.WithHelp("^space", "autocomplete"),
 	),
 }

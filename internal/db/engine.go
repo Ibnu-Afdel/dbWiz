@@ -40,6 +40,7 @@ type Capabilities struct {
 	Users             bool // engine has a concept of database users/roles
 	Grants            bool // engine supports GRANT/REVOKE
 	MultipleDatabases bool // engine hosts more than one database per server
+	RoleFlags         bool // engine has togglable role flags (Postgres LOGIN/CREATEDB)
 }
 
 // Target describes how to reach a database. For server engines the network
@@ -75,9 +76,13 @@ type Column struct {
 	Key      string // "PRI", "FK", "" etc. — engine-specific label
 }
 
-// User is a database user/role.
+// User is a database user/role. CanLogin and CreateDB are only meaningful when
+// the engine reports Capabilities.RoleFlags (Postgres); other engines leave them
+// zero.
 type User struct {
-	Name string
+	Name     string
+	CanLogin bool
+	CreateDB bool
 }
 
 // CreateOpts carries options for CreateDatabase. In v1 only Owner is used.
@@ -85,8 +90,9 @@ type CreateOpts struct {
 	Owner string // user to own the new database; empty means engine default
 }
 
-// GrantLevel is the coarse permission level applied by Grant/Revoke. v1 only
-// implements GrantAll; the full matrix arrives in v2.
+// GrantLevel is the coarse permission level applied by Grant/Revoke: a single
+// "everything on this database" grant. It backs the create-database-with-user
+// shortcut; the per-privilege matrix (v2 3.1) goes through SetGrant instead.
 type GrantLevel int
 
 const (
@@ -119,8 +125,25 @@ type Engine interface {
 	ListUsers(ctx context.Context) ([]User, error)
 	CreateUser(ctx context.Context, name, password string) error
 	DropUser(ctx context.Context, name string) error
+
+	// AlterUser sets an existing role's flags (v2 3.2). Only meaningful where
+	// Capabilities.RoleFlags is true (Postgres LOGIN/CREATEDB); other engines
+	// return DBErrUnsupported. SetPassword changes an existing user's password;
+	// available on any engine with Users.
+	AlterUser(ctx context.Context, name string, canLogin, createDB bool) error
+	SetPassword(ctx context.Context, name, password string) error
 	Grant(ctx context.Context, user, database string, level GrantLevel) error
 	Revoke(ctx context.Context, user, database string, level GrantLevel) error
+
+	// Grant matrix (v2 3.1), database scope. DatabasePrivileges reports the
+	// privilege columns this engine offers, in display order (empty for engines
+	// without grants). ListGrants reports which of those the user currently holds
+	// on database — the effective privilege where the engine can report it
+	// (Postgres folds in PUBLIC/role inheritance). SetGrant grants (grant=true) or
+	// revokes one privilege; priv must be one of DatabasePrivileges.
+	DatabasePrivileges() []Privilege
+	ListGrants(ctx context.Context, user, database string) ([]Privilege, error)
+	SetGrant(ctx context.Context, user, database string, priv Privilege, grant bool) error
 
 	// Query runs an arbitrary statement. Cancellation flows through ctx.
 	Query(ctx context.Context, sql string) (Result, error)

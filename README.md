@@ -55,6 +55,34 @@ That's it — no config files, no connection strings.
 
 On [Omarchy](https://omarchy.org) machines DBWiz recognizes the stock database containers, tags them with an `[omarchy]` badge, and uses their known default credentials — so `dbwiz` → pick a database → you're in, with no prompts. If you have no database containers yet, the empty state points you at `omarchy-install-docker-dbs`.
 
+## Configuration (optional)
+
+DBWiz needs no configuration — everything works out of the box. But you can drop an opt-in file at `~/.config/dbwiz/config.toml` (respects `$XDG_CONFIG_HOME`) to set a theme, change the default preview row limit, and save **manual targets**: databases DBWiz can't find through Docker (a remote or host-native server you reach by host/port). Saved targets appear on the home menu; DBWiz still prompts for the password (it's never stored on disk).
+
+```toml
+# ~/.config/dbwiz/config.toml — every field is optional
+
+theme = "default"          # "default", "high-contrast", or "warm"
+default_row_limit = 200    # rows a table preview pulls
+
+[[target]]
+name = "prod read-replica"
+engine = "postgres"        # "postgres", "mysql", or "mariadb"
+host = "db.internal"
+port = 5432
+user = "readonly"
+database = "appdb"         # optional initial database
+
+[[target]]
+name = "staging mysql"
+engine = "mysql"
+host = "127.0.0.1"
+port = 3306
+user = "root"
+```
+
+A malformed file is reported on stderr and DBWiz launches with defaults; a missing file is not an error.
+
 ## Keys
 
 The help bar at the bottom always reflects where you are; press `?` for the full keymap. The essentials:
@@ -65,6 +93,8 @@ The help bar at the bottom always reflects where you are; press `?` for the full
 | `←`/`→` (or `h`/`l`) | move across result columns |
 | `Enter` | select / open · **inspect the selected cell** (results) |
 | `Tab` | cycle panes (dashboard) |
+| `c` / `D` | create / delete (databases · users) |
+| `g` / `a` | grant matrix · edit user (users pane) |
 | `e` | focus the SQL editor |
 | `Ctrl+R` / `F5` | run the query |
 | `Esc` | back / cancel |

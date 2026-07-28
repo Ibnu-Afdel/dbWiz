@@ -271,6 +271,26 @@ func (m *MySQL) DropUser(ctx context.Context, name string) error {
 	return nil
 }
 
+// AlterUser has no effect on MySQL: it has no LOGIN/CREATEDB role flags to
+// toggle (Capabilities.RoleFlags is false), so this is unsupported.
+func (m *MySQL) AlterUser(ctx context.Context, name string, canLogin, createDB bool) error {
+	return errUnsupported("role flags", m.kind)
+}
+
+// SetPassword changes the password of the name@'%' account. The password is a
+// literal, escaped by quoteMySQLLiteral.
+func (m *MySQL) SetPassword(ctx context.Context, name, password string) error {
+	if err := validateIdent(name); err != nil {
+		return err
+	}
+	stmt := fmt.Sprintf("ALTER USER %s@'%%' IDENTIFIED BY %s",
+		quoteMySQLIdent(name), quoteMySQLLiteral(password))
+	if _, err := m.pool.ExecContext(ctx, stmt); err != nil {
+		return classifyMySQL(err)
+	}
+	return nil
+}
+
 func (m *MySQL) Grant(ctx context.Context, user, database string, level GrantLevel) error {
 	return m.grantRevoke(ctx, true, user, database)
 }
@@ -294,6 +314,71 @@ func (m *MySQL) grantRevoke(ctx context.Context, grant bool, user, database stri
 		stmt = fmt.Sprintf("GRANT ALL PRIVILEGES ON %s TO %s@'%%'", obj, quoteMySQLIdent(user))
 	} else {
 		stmt = fmt.Sprintf("REVOKE ALL PRIVILEGES ON %s FROM %s@'%%'", obj, quoteMySQLIdent(user))
+	}
+	if _, err := m.pool.ExecContext(ctx, stmt); err != nil {
+		return classifyMySQL(err)
+	}
+	return nil
+}
+
+func (m *MySQL) DatabasePrivileges() []Privilege { return mysqlDatabasePrivileges }
+
+// ListGrants reports which schema-scope privileges user holds on database. It
+// reads information_schema.schema_privileges for the name@'%' account CreateUser
+// makes. Global grants (ON *.*, e.g. a root account's GRANT ALL) live in
+// user_privileges and are deliberately not folded in here — this is the
+// per-database matrix, so it shows only what was granted on this database.
+func (m *MySQL) ListGrants(ctx context.Context, user, database string) ([]Privilege, error) {
+	if err := validateIdent(user); err != nil {
+		return nil, err
+	}
+	if err := validateIdent(database); err != nil {
+		return nil, err
+	}
+	// grantee is the stored "'user'@'host'" string; both it and the schema are
+	// bound parameters, so no quoting is needed for this read.
+	grantee := fmt.Sprintf("'%s'@'%%'", user)
+	rows, err := m.pool.QueryContext(ctx,
+		`SELECT privilege_type FROM information_schema.schema_privileges
+		 WHERE grantee = ? AND table_schema = ?`, grantee, database)
+	if err != nil {
+		return nil, classifyMySQL(err)
+	}
+	defer rows.Close()
+	var held []Privilege
+	for rows.Next() {
+		var pt string
+		if err := rows.Scan(&pt); err != nil {
+			return nil, classifyMySQL(err)
+		}
+		// schema_privileges also reports privileges outside our matrix (REFERENCES,
+		// LOCK TABLES, …); keep only the columns we show.
+		if p := Privilege(pt); knownPrivilege(mysqlDatabasePrivileges, p) {
+			held = append(held, p)
+		}
+	}
+	return held, m.wrap(rows.Err())
+}
+
+// SetGrant grants or revokes one schema-scope privilege for user on database.
+func (m *MySQL) SetGrant(ctx context.Context, user, database string, priv Privilege, grant bool) error {
+	if err := validateIdent(user); err != nil {
+		return err
+	}
+	if err := validateIdent(database); err != nil {
+		return err
+	}
+	if !knownPrivilege(mysqlDatabasePrivileges, priv) {
+		return errInvalidPrivilege(priv)
+	}
+	// priv is whitelisted above; the database identifier is quoted and ".*" appended
+	// outside the quotes, as in the ALL-level grantRevoke.
+	obj := quoteMySQLIdent(database) + ".*"
+	var stmt string
+	if grant {
+		stmt = fmt.Sprintf("GRANT %s ON %s TO %s@'%%'", string(priv), obj, quoteMySQLIdent(user))
+	} else {
+		stmt = fmt.Sprintf("REVOKE %s ON %s FROM %s@'%%'", string(priv), obj, quoteMySQLIdent(user))
 	}
 	if _, err := m.pool.ExecContext(ctx, stmt); err != nil {
 		return classifyMySQL(err)

@@ -151,7 +151,7 @@ func TestCreateUserOpens(t *testing.T) {
 
 // TestCreateUserPasswordMismatch covers the confirm-field validation.
 func TestCreateUserPasswordMismatch(t *testing.T) {
-	f := newCreateUserForm()
+	f := newCreateUserForm(db.KindPostgres)
 	f = typeInto2(f, "bob")                               // name
 	f, _, _ = f.update(tea.KeyPressMsg{Code: tea.KeyTab}) // → password
 	f = typeInto2(f, "secret")                            // password
@@ -162,36 +162,196 @@ func TestCreateUserPasswordMismatch(t *testing.T) {
 	}
 }
 
-// TestGrantFlow covers Step 6.6: [g] on a user opens the picker; enter grants
-// the chosen database.
-func TestGrantFlow(t *testing.T) {
+// TestEditUserOpensWithCurrentFlags covers v2 3.2: [a] on a user opens the edit
+// form, seeded with the user's current LOGIN flag and titled with its name.
+func TestEditUserOpensWithCurrentFlags(t *testing.T) {
 	s, _ := newPGDashboard(t)
+	s.focus = focusUsers // alice is first, CanLogin true
+	s, cmd := press(s, tea.KeyPressMsg{Code: 'a', Text: "a"})
+	if s.mode != modeForm || s.formPurpose != purposeEditUser {
+		t.Fatalf("[a] should open the edit-user form; mode=%d purpose=%d", s.mode, s.formPurpose)
+	}
+	if s.editUserName != "alice" {
+		t.Errorf("edit subject should be alice, got %q", s.editUserName)
+	}
+	if !s.form.toggle("canLogin") {
+		t.Error("form should preset LOGIN from the user's current flag")
+	}
+	if cmd == nil {
+		t.Error("opening the form should return its Init command")
+	}
+	if !strings.Contains(s.form.View(120), "Edit user alice") {
+		t.Error("form should be titled for the user")
+	}
+}
+
+// TestEditUserIsUsersPaneOnly covers the gating: [a] does nothing off the users
+// pane and is inert on SQLite (no users at all).
+func TestEditUserIsUsersPaneOnly(t *testing.T) {
+	s, _ := newPGDashboard(t)
+	s.focus = focusDatabases
+	s, _ = press(s, tea.KeyPressMsg{Code: 'a', Text: "a"})
+	if s.mode != modeBrowse {
+		t.Error("[a] on the databases pane should be inert")
+	}
+
+	sq := sqliteDashboard(t)
+	sq, _ = press(sq, tea.KeyPressMsg{Code: 'a', Text: "a"})
+	if sq.mode != modeBrowse {
+		t.Error("SQLite should ignore [a] (no users)")
+	}
+}
+
+// TestAlterUserCmd covers the edit command's two independent effects: role flags
+// only when the engine has them, and a password change only when one was typed.
+func TestAlterUserCmd(t *testing.T) {
+	eng := pgEngine()
+	msg := runCmd(t, alterUserCmd(eng, "alice", true, false, true, "newpw"))
+	done, ok := msg.(adminDoneMsg)
+	if !ok || !done.reloadUsers {
+		t.Fatalf("alterUserCmd should report a users reload, got %#v", msg)
+	}
+	if eng.lastAlterUser != "alice" || eng.lastAlterLogin || !eng.lastAlterCDB {
+		t.Errorf("flags recorded user=%q login=%v createdb=%v", eng.lastAlterUser, eng.lastAlterLogin, eng.lastAlterCDB)
+	}
+	if eng.lastPwUser != "alice" || eng.lastPwValue != "newpw" {
+		t.Errorf("password recorded user=%q value=%q", eng.lastPwUser, eng.lastPwValue)
+	}
+
+	// No password typed → SetPassword is not called; no flags → AlterUser skipped.
+	eng2 := pgEngine()
+	runCmd(t, alterUserCmd(eng2, "bob", false, false, false, ""))
+	if eng2.lastPwUser != "" {
+		t.Error("a blank password should not call SetPassword")
+	}
+	if eng2.lastAlterUser != "" {
+		t.Error("hasFlags=false should not call AlterUser")
+	}
+}
+
+// TestEditUserFormMySQLNote covers the plain-language host explainer (v2 3.2):
+// MySQL forms carry it and offer no role toggles; Postgres forms omit it.
+func TestEditUserFormMySQLNote(t *testing.T) {
+	my := newEditUserForm(db.User{Name: "app"}, false, db.KindMySQL).View(120)
+	if !strings.Contains(my, "user@'%'") {
+		t.Error("MySQL edit form should explain the host part")
+	}
+	if strings.Contains(my, "LOGIN") {
+		t.Error("MySQL has no role flags — the edit form should show no LOGIN toggle")
+	}
+	create := newCreateUserForm(db.KindMySQL).View(120)
+	if !strings.Contains(create, "user@'%'") {
+		t.Error("MySQL create form should explain the host part too")
+	}
+	pg := newEditUserForm(db.User{Name: "app", CanLogin: true}, true, db.KindPostgres).View(120)
+	if strings.Contains(pg, "user@'%'") {
+		t.Error("Postgres has no host part — the note should be absent")
+	}
+	if !strings.Contains(pg, "LOGIN") {
+		t.Error("Postgres edit form should offer the LOGIN toggle")
+	}
+}
+
+// TestGrantMatrixFlow covers v2 3.1: [g] on a user opens the matrix on its
+// database picker; opening a database loads that user's current grants; space
+// toggles a privilege, applying it through the engine and refreshing the view.
+func TestGrantMatrixFlow(t *testing.T) {
+	s, eng := newPGDashboard(t)
+	// bob already holds CONNECT on appdb.
+	eng.grants = map[string][]db.Privilege{
+		eng.grantKey("bob", "appdb"): {db.PrivConnect},
+	}
+
 	s.focus = focusUsers
 	s, _ = press(s, tea.KeyPressMsg{Code: tea.KeyDown}) // select bob
 	s, _ = press(s, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	if s.mode != modeGrant || s.grant.subject != "bob" {
-		t.Fatalf("[g] should open grant for bob; mode=%d subject=%q", s.mode, s.grant.subject)
+		t.Fatalf("[g] should open the matrix for bob; mode=%d subject=%q", s.mode, s.grant.subject)
 	}
-	// The picker offers the databases.
-	if len(s.grant.items) != 2 {
-		t.Fatalf("grant picker should list 2 databases, got %d", len(s.grant.items))
+	if s.grant.step != grantStepDB || len(s.grant.items) != 2 {
+		t.Fatalf("matrix should start on the db picker with 2 dbs; step=%d items=%d", s.grant.step, len(s.grant.items))
 	}
-	s, _ = press(s, tea.KeyPressMsg{Code: tea.KeyEnter}) // grant on the first db
-	if s.mode != modeBrowse || !s.working {
-		t.Fatalf("choosing should fire the grant; mode=%d working=%v", s.mode, s.working)
+
+	// Move to appdb (2nd db) and open it.
+	s, _ = press(s, tea.KeyPressMsg{Code: tea.KeyDown})
+	s, cmd := press(s, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if s.grant.step != grantStepMatrix || s.grant.database != "appdb" || !s.grant.loading {
+		t.Fatalf("enter should descend into the matrix for appdb, loading; step=%d db=%q loading=%v",
+			s.grant.step, s.grant.database, s.grant.loading)
+	}
+	s = feed(s, runCmd(t, cmd)) // grantsLoadedMsg
+	if s.grant.loading || !s.grant.held[db.PrivConnect] {
+		t.Fatalf("loaded matrix should show CONNECT held and not be loading; held=%v", s.grant.held)
+	}
+
+	// Highlight CREATE (2nd column) and grant it with space.
+	s, _ = press(s, tea.KeyPressMsg{Code: tea.KeyDown})
+	s, cmd = press(s, tea.KeyPressMsg{Code: ' ', Text: " "})
+	if !s.grant.loading {
+		t.Fatal("toggling should mark the overlay loading")
+	}
+	setMsg, ok := runCmd(t, cmd).(grantSetMsg)
+	if !ok || setMsg.priv != db.PrivCreate || !setMsg.grant {
+		t.Fatalf("space should grant CREATE, got %#v", setMsg)
+	}
+	if eng.lastSetPriv != db.PrivCreate || !eng.lastSetGrant || eng.lastSetUser != "bob" || eng.lastSetDB != "appdb" {
+		t.Fatalf("engine should record GRANT CREATE for bob on appdb; got user=%q db=%q priv=%q grant=%v",
+			eng.lastSetUser, eng.lastSetDB, eng.lastSetPriv, eng.lastSetGrant)
+	}
+	// The ack toasts and refreshes the matrix from the server.
+	next, reload := s.Update(setMsg)
+	s = next.(dashboardScreen)
+	if !strings.Contains(s.notice, "Granted CREATE") {
+		t.Errorf("a granted toggle should toast; notice=%q", s.notice)
+	}
+	s = feed(s, runCmd(t, reload))
+	if !s.grant.held[db.PrivCreate] {
+		t.Errorf("after refresh CREATE should be held; held=%v", s.grant.held)
 	}
 }
 
-// TestGrantCmd checks the grant command hits the engine with the right pair.
-func TestGrantCmd(t *testing.T) {
-	eng := pgEngine()
-	runCmd(t, grantCmd(eng, "bob", "appdb", true))
-	if eng.lastGrantUser != "bob" || eng.lastGrantDB != "appdb" || !eng.lastGranted {
-		t.Errorf("grant recorded user=%q db=%q granted=%v", eng.lastGrantUser, eng.lastGrantDB, eng.lastGranted)
+// TestGrantMatrixEscStepsBack covers the two-level esc: from the matrix, esc
+// returns to the database picker (keeping the overlay open); a second esc closes
+// it entirely.
+func TestGrantMatrixEscStepsBack(t *testing.T) {
+	s, _ := newPGDashboard(t)
+	s.focus = focusUsers
+	s, _ = press(s, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	s, cmd := press(s, tea.KeyPressMsg{Code: tea.KeyEnter}) // open first db
+	s = feed(s, runCmd(t, cmd))
+	if s.grant.step != grantStepMatrix {
+		t.Fatalf("should be in the matrix; step=%d", s.grant.step)
 	}
-	runCmd(t, grantCmd(eng, "bob", "appdb", false))
-	if eng.lastGranted {
-		t.Error("revoke should record granted=false")
+	s, _ = press(s, tea.KeyPressMsg{Code: tea.KeyEsc}) // back to picker
+	if s.mode != modeGrant || s.grant.step != grantStepDB {
+		t.Fatalf("esc from matrix should return to the db picker; mode=%d step=%d", s.mode, s.grant.step)
+	}
+	s, _ = press(s, tea.KeyPressMsg{Code: tea.KeyEsc}) // close overlay
+	if s.mode != modeBrowse {
+		t.Errorf("esc from the picker should close the overlay; mode=%d", s.mode)
+	}
+}
+
+// TestGrantCommands checks the load/apply commands hit the engine correctly.
+func TestGrantCommands(t *testing.T) {
+	eng := pgEngine()
+	setMsg, ok := runCmd(t, setGrantCmd(eng, "bob", "appdb", db.PrivConnect, true)).(grantSetMsg)
+	if !ok || !setMsg.grant || setMsg.priv != db.PrivConnect {
+		t.Fatalf("setGrantCmd should ack a grant, got %#v", setMsg)
+	}
+	if eng.lastSetUser != "bob" || eng.lastSetDB != "appdb" || eng.lastSetPriv != db.PrivConnect || !eng.lastSetGrant {
+		t.Errorf("engine recorded user=%q db=%q priv=%q grant=%v",
+			eng.lastSetUser, eng.lastSetDB, eng.lastSetPriv, eng.lastSetGrant)
+	}
+	// loadGrantsCmd reads it back.
+	lm := runCmd(t, loadGrantsCmd(eng, "bob", "appdb")).(grantsLoadedMsg)
+	if len(lm.held) != 1 || lm.held[0] != db.PrivConnect {
+		t.Fatalf("loadGrantsCmd should report the held privilege, got %v", lm.held)
+	}
+	// A revoke removes it.
+	runCmd(t, setGrantCmd(eng, "bob", "appdb", db.PrivConnect, false))
+	if lm := runCmd(t, loadGrantsCmd(eng, "bob", "appdb")).(grantsLoadedMsg); len(lm.held) != 0 {
+		t.Errorf("after revoke nothing should be held, got %v", lm.held)
 	}
 }
 

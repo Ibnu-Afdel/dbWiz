@@ -36,6 +36,15 @@ func (stubEngine) DropUser(context.Context, string) error                   { re
 func (stubEngine) Grant(context.Context, string, string, GrantLevel) error  { return nil }
 func (stubEngine) Revoke(context.Context, string, string, GrantLevel) error { return nil }
 
+func (stubEngine) AlterUser(context.Context, string, bool, bool) error { return nil }
+func (stubEngine) SetPassword(context.Context, string, string) error   { return nil }
+
+func (stubEngine) DatabasePrivileges() []Privilege { return nil }
+func (stubEngine) ListGrants(context.Context, string, string) ([]Privilege, error) {
+	return nil, nil
+}
+func (stubEngine) SetGrant(context.Context, string, string, Privilege, bool) error { return nil }
+
 func (stubEngine) Query(context.Context, string) (Result, error) { return Result{}, nil }
 
 // Compile-time assertion that stubEngine satisfies Engine.

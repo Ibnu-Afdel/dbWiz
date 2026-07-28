@@ -94,6 +94,47 @@ func TestPGDatabasesAndAdmin(t *testing.T) {
 	if err := e.Revoke(ctx, user, name, GrantAll); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
+
+	// Per-privilege matrix (v2 3.1): grant CREATE, confirm ListGrants reflects it,
+	// then revoke and confirm it's gone. A brand-new role gets CONNECT via PUBLIC,
+	// so this asserts on CREATE, which PUBLIC does not carry.
+	if err := e.SetGrant(ctx, user, name, PrivCreate, true); err != nil {
+		t.Fatalf("SetGrant CREATE: %v", err)
+	}
+	held, err := e.ListGrants(ctx, user, name)
+	if err != nil {
+		t.Fatalf("ListGrants: %v", err)
+	}
+	if !containsPriv(held, PrivCreate) {
+		t.Errorf("after GRANT CREATE, ListGrants = %v, want it to include CREATE", held)
+	}
+	if err := e.SetGrant(ctx, user, name, PrivCreate, false); err != nil {
+		t.Fatalf("SetGrant revoke CREATE: %v", err)
+	}
+	held, _ = e.ListGrants(ctx, user, name)
+	if containsPriv(held, PrivCreate) {
+		t.Errorf("after REVOKE CREATE, ListGrants = %v, want CREATE gone", held)
+	}
+	// An unknown privilege is rejected before it reaches the server.
+	if err := e.SetGrant(ctx, user, name, Privilege("DROP TABLE users; --"), true); err == nil {
+		t.Error("SetGrant should reject a privilege outside the engine's set")
+	}
+
+	// Role flags + password change (v2 3.2): flip CREATEDB on and confirm
+	// ListUsers reflects it, then change the password.
+	if err := e.AlterUser(ctx, user, true, true); err != nil {
+		t.Fatalf("AlterUser: %v", err)
+	}
+	flagged, err := e.ListUsers(ctx)
+	if err != nil {
+		t.Fatalf("ListUsers after AlterUser: %v", err)
+	}
+	if !userHasCreateDB(flagged, user) {
+		t.Errorf("after AlterUser CREATEDB, %q should report CreateDB=true", user)
+	}
+	if err := e.SetPassword(ctx, user, "newpw456"); err != nil {
+		t.Fatalf("SetPassword: %v", err)
+	}
 	users, err := e.ListUsers(ctx)
 	if err != nil {
 		t.Fatalf("ListUsers: %v", err)
@@ -216,6 +257,24 @@ func hasUser(users []User, name string) bool {
 	for _, u := range users {
 		if u.Name == name {
 			return true
+		}
+	}
+	return false
+}
+
+func containsPriv(privs []Privilege, p Privilege) bool {
+	for _, q := range privs {
+		if q == p {
+			return true
+		}
+	}
+	return false
+}
+
+func userHasCreateDB(users []User, name string) bool {
+	for _, u := range users {
+		if u.Name == name {
+			return u.CreateDB
 		}
 	}
 	return false

@@ -1,14 +1,25 @@
 // Package styles holds the DBWiz color palette and shared Lip Gloss styles.
 // Screens must pull styles from here — no inline colors anywhere else, so the
 // whole app re-themes from this one file.
+//
+// The shared styles are rebuilt from the palette by rebuild(), which init() runs
+// once at startup and Apply() re-runs when the user picks a theme in config (v2
+// 3.3). Reassigning a palette var alone isn't enough — a Lip Gloss style copies
+// the color when it's built — so any theme change goes through Apply.
 package styles
 
-import "charm.land/lipgloss/v2"
+import (
+	"image/color"
+	"strings"
+
+	"charm.land/lipgloss/v2"
+)
 
 // Palette. Kept small and named by role, not by hue, so the theme can change in
 // one place. Colors are ANSI-256 indices: they resolve against the terminal's
 // own palette, so they adapt to light and dark themes without us swapping
-// values per background.
+// values per background. A theme (see themes) reassigns these, then rebuild()
+// re-derives the styles below.
 var (
 	Accent  = lipgloss.Color("39")  // interactive / focused
 	Success = lipgloss.Color("42")  // completed / healthy / running
@@ -18,83 +29,121 @@ var (
 	Text    = lipgloss.Color("252") // primary body text
 )
 
+// theme is a named palette variant. Only the accent and text tones vary; the
+// semantic colors (success/danger/warning) stay put so their meaning is stable
+// across themes.
+type theme struct {
+	accent color.Color
+	muted  color.Color
+	text   color.Color
+}
+
+// themes are the palettes config's `theme = "..."` can select. An unknown name
+// falls back to "default" (Apply never errors).
+var themes = map[string]theme{
+	"default":       {accent: lipgloss.Color("39"), muted: lipgloss.Color("245"), text: lipgloss.Color("252")},
+	"high-contrast": {accent: lipgloss.Color("45"), muted: lipgloss.Color("250"), text: lipgloss.Color("255")},
+	"warm":          {accent: lipgloss.Color("208"), muted: lipgloss.Color("245"), text: lipgloss.Color("252")},
+}
+
+// Apply selects a named theme (case-insensitive) and rebuilds the shared styles.
+// An empty or unknown name applies the default palette, so a bad config value
+// degrades to the standard look rather than an error. It is called once at
+// startup from the TUI entry point, before the program runs.
+func Apply(name string) {
+	th, ok := themes[strings.ToLower(strings.TrimSpace(name))]
+	if !ok {
+		th = themes["default"]
+	}
+	Accent, Muted, Text = th.accent, th.muted, th.text
+	rebuild()
+}
+
 // Shared styles. Every screen composes its view from these; a screen that needs
-// a new visual role adds it here rather than styling inline.
+// a new visual role adds it here rather than styling inline. They are assigned
+// by rebuild() so a theme change re-derives them from the current palette.
 var (
-	// Title is the app/screen heading.
+	Title    lipgloss.Style // the app/screen heading
+	Subtitle lipgloss.Style // a secondary heading (e.g. a screen's one-line purpose)
+	Hint     lipgloss.Style // de-emphasized helper text (e.g. the "press q to quit" line)
+	Selected lipgloss.Style // the focused row in a menu or list
+	Item     lipgloss.Style // an unfocused, selectable row
+
+	Running lipgloss.Style // a detected running container
+	Stopped lipgloss.Style // a detected stopped container
+	Badge   lipgloss.Style // provenance tag (e.g. the Omarchy badge)
+
+	DangerText  lipgloss.Style // inline colored spans
+	SuccessText lipgloss.Style
+	WarningText lipgloss.Style
+
+	ErrorTitle lipgloss.Style // the full-screen error renderer's heading
+	ErrorBox   lipgloss.Style // its bordered body
+	OverlayBox lipgloss.Style // the neutral bordered modal (cell-detail inspector)
+
+	Screen lipgloss.Style // the outer padding every screen renders inside
+
+	Pane        lipgloss.Style // the dashboard's three bordered panes
+	PaneFocused lipgloss.Style // the focused pane borders in Accent
+
+	PaneTitle        lipgloss.Style // heads each pane
+	PaneTitleFocused lipgloss.Style // the focused pane's title brightens to Accent
+
+	TabActive   lipgloss.Style // the tab bar (v2 Phase 1)
+	TabInactive lipgloss.Style
+
+	TableHeader   lipgloss.Style // the results grid's column-header row
+	NullText      lipgloss.Style // a SQL NULL cell, distinct from an empty string
+	TableSelected lipgloss.Style // the cell under the results cursor (reverse video)
+)
+
+// rebuild re-derives every shared style from the current palette. Called once by
+// init and again by Apply on a theme change.
+func rebuild() {
 	Title = lipgloss.NewStyle().Bold(true).Foreground(Accent)
-
-	// Subtitle is a secondary heading (e.g. a screen's one-line purpose).
 	Subtitle = lipgloss.NewStyle().Foreground(Text)
-
-	// Hint is de-emphasized helper text (e.g. the "press q to quit" line).
 	Hint = lipgloss.NewStyle().Foreground(Muted)
-
-	// Selected marks the focused row in a menu or list.
 	Selected = lipgloss.NewStyle().Bold(true).Foreground(Accent)
-
-	// Item is an unfocused, selectable row.
 	Item = lipgloss.NewStyle().Foreground(Text)
 
-	// Running / Stopped label detected containers by state.
 	Running = lipgloss.NewStyle().Bold(true).Foreground(Success)
 	Stopped = lipgloss.NewStyle().Foreground(Muted)
-
-	// Badge tags a container with provenance (e.g. the Omarchy badge).
 	Badge = lipgloss.NewStyle().Foreground(Warning)
 
-	// DangerText / SuccessText / WarningText are inline colored spans.
-	DangerText  = lipgloss.NewStyle().Foreground(Danger)
+	DangerText = lipgloss.NewStyle().Foreground(Danger)
 	SuccessText = lipgloss.NewStyle().Foreground(Success)
 	WarningText = lipgloss.NewStyle().Foreground(Warning)
 
-	// ErrorTitle / ErrorBox render the full-screen error renderer's heading and
-	// bordered body.
 	ErrorTitle = lipgloss.NewStyle().Bold(true).Foreground(Danger)
-	ErrorBox   = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(Danger).
-			Padding(0, 2)
-
-	// OverlayBox is the neutral bordered modal used by non-error overlays (the
-	// cell-detail inspector), so it reads as informational, not a failure.
+	ErrorBox = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(Danger).
+		Padding(0, 2)
 	OverlayBox = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(Accent).
-			Padding(0, 2)
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(Accent).
+		Padding(0, 2)
 
-	// Screen is the outer padding every screen renders inside.
 	Screen = lipgloss.NewStyle().Padding(1, 2)
 
-	// Pane / PaneFocused are the bordered boxes the dashboard's three panes
-	// render inside. The focused pane borders in Accent so focus is obvious at a
-	// glance; the rest border in Muted. Horizontal padding only — vertical space
-	// is precious, so panes hug their content top-to-bottom.
 	Pane = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(Muted).
 		Padding(0, 1)
 	PaneFocused = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(Accent).
-			Padding(0, 1)
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(Accent).
+		Padding(0, 1)
 
-	// PaneTitle heads each pane; the focused pane's title brightens to Accent via
-	// PaneTitleFocused so the eye finds the active pane even in a screenshot.
-	PaneTitle        = lipgloss.NewStyle().Bold(true).Foreground(Muted)
+	PaneTitle = lipgloss.NewStyle().Bold(true).Foreground(Muted)
 	PaneTitleFocused = lipgloss.NewStyle().Bold(true).Foreground(Accent)
 
-	// TabActive / TabInactive render the tab bar shown when more than one target
-	// is open (v2 Phase 1). The active tab reverses to Accent so the current
-	// target is unmistakable; inactive tabs sit muted alongside it.
-	TabActive   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(Accent)
+	TabActive = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(Accent)
 	TabInactive = lipgloss.NewStyle().Foreground(Muted)
 
-	// TableHeader marks the column-header row of the results grid; NullText marks
-	// a SQL NULL cell so it reads distinctly from an empty string. TableSelected
-	// highlights the cell under the results cursor (reverse video, so it stands out
-	// on any palette).
-	TableHeader   = lipgloss.NewStyle().Bold(true).Foreground(Accent)
-	NullText      = lipgloss.NewStyle().Faint(true).Foreground(Muted).Italic(true)
+	TableHeader = lipgloss.NewStyle().Bold(true).Foreground(Accent)
+	NullText = lipgloss.NewStyle().Faint(true).Foreground(Muted).Italic(true)
 	TableSelected = lipgloss.NewStyle().Reverse(true)
-)
+}
+
+func init() { rebuild() }

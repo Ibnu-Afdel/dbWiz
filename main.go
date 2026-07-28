@@ -31,6 +31,9 @@ var rootCmd = &cobra.Command{
 	// Print just "dbwiz <version>" for --version rather than the default template.
 	// Don't print usage on runtime errors from the TUI; usage is for arg errors.
 	SilenceUsage: true,
+	// main() prints the returned error once and exits non-zero; without this cobra
+	// would also print it, so a failing subcommand would report twice.
+	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return tui.Run()
 	},
@@ -40,7 +43,15 @@ var rootCmd = &cobra.Command{
 func main() {
 	// Scripting subcommands (v2 on) live in package cmd; the bare `dbwiz` still
 	// launches the TUI via rootCmd's RunE.
-	rootCmd.AddCommand(cmd.NewUseCommand())
+	rootCmd.AddCommand(
+		cmd.NewUseCommand(),
+		cmd.NewListCommand(),
+		cmd.NewCreateCommand(),
+		cmd.NewDropCommand(),
+		cmd.NewQueryCommand(),
+		cmd.NewDumpCommand(),
+		cmd.NewRestoreCommand(),
+	)
 	// "dbwiz v1.0.0" rather than cobra's default "dbwiz version v1.0.0".
 	rootCmd.SetVersionTemplate("dbwiz {{.Version}}\n")
 	if err := rootCmd.Execute(); err != nil {

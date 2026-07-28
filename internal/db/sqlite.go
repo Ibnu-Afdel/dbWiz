@@ -228,6 +228,24 @@ func (s *SQLite) Revoke(ctx context.Context, user, database string, level GrantL
 	return errUnsupported("grants", KindSQLite)
 }
 
+func (s *SQLite) AlterUser(ctx context.Context, name string, canLogin, createDB bool) error {
+	return errUnsupported("users", KindSQLite)
+}
+
+func (s *SQLite) SetPassword(ctx context.Context, name, password string) error {
+	return errUnsupported("users", KindSQLite)
+}
+
+func (s *SQLite) DatabasePrivileges() []Privilege { return nil }
+
+func (s *SQLite) ListGrants(ctx context.Context, user, database string) ([]Privilege, error) {
+	return nil, errUnsupported("grants", KindSQLite)
+}
+
+func (s *SQLite) SetGrant(ctx context.Context, user, database string, priv Privilege, grant bool) error {
+	return errUnsupported("grants", KindSQLite)
+}
+
 func (s *SQLite) Query(ctx context.Context, sql string) (Result, error) {
 	res, err := runSQL(ctx, s.pool, sql)
 	if err != nil {

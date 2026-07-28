@@ -50,6 +50,8 @@ type formField struct {
 // Screen.
 type formModel struct {
 	title  string
+	note   string // optional plain-language line under the title (e.g. the MySQL host explainer)
+	submit string // footer verb ("create" when empty) — "save" for the edit form
 	fields []formField
 	focus  int // index into fields (always a visible one)
 
@@ -82,10 +84,17 @@ func newCreateDBForm() formModel {
 	return f
 }
 
+// mysqlHostNote explains DBWiz's user@'%' host convention in plain language, so
+// the MySQL/MariaDB user forms make clear where the account can connect from
+// (v2 3.2). Postgres has no host part, so its forms omit it.
+const mysqlHostNote = "This user is created as user@'%' — reachable from any host, which is what containers need. " +
+	"(MySQL also has user@'localhost' for socket-only access; DBWiz doesn't create those.)"
+
 // newCreateUserForm builds the create-user form (Step 6.4): a name with live
 // validation, a masked password, and a confirm field that must match. An empty
-// password is warned but allowed (this is local dev).
-func newCreateUserForm() formModel {
+// password is warned but allowed (this is local dev). On MySQL/MariaDB it also
+// shows the host-part note (v2 3.2).
+func newCreateUserForm(kind db.Kind) formModel {
 	name := textinput.New()
 	name.Prompt = "› "
 	name.Placeholder = "app_user"
@@ -102,6 +111,7 @@ func newCreateUserForm() formModel {
 
 	return formModel{
 		title: "Create user",
+		note:  hostNoteFor(kind),
 		fields: []formField{
 			{key: "name", label: "User name", kind: fieldText, input: name},
 			{key: "password", label: "Password", kind: fieldText, input: pass},
@@ -109,6 +119,46 @@ func newCreateUserForm() formModel {
 		},
 		validate: validateCreateUser,
 	}
+}
+
+// newEditUserForm builds the edit-user form (v2 3.2): on engines with role flags
+// (Postgres) it offers LOGIN and CREATEDB toggles preset to the user's current
+// state; every server engine gets a "new password (blank = keep)" field. MySQL
+// shows the host-part note. u carries the current flags from ListUsers.
+func newEditUserForm(u db.User, roleFlags bool, kind db.Kind) formModel {
+	pass := textinput.New()
+	pass.Prompt = "› "
+	pass.Placeholder = "(leave blank to keep current)"
+	pass.EchoMode = textinput.EchoPassword
+
+	var fields []formField
+	if roleFlags {
+		fields = append(fields,
+			formField{key: "canLogin", label: "Can log in (LOGIN)", kind: fieldToggle, on: u.CanLogin},
+			formField{key: "createDB", label: "Can create databases (CREATEDB)", kind: fieldToggle, on: u.CreateDB},
+		)
+	}
+	fields = append(fields, formField{key: "password", label: "New password", kind: fieldText, input: pass})
+
+	f := formModel{
+		title:    "Edit user " + u.Name,
+		note:     hostNoteFor(kind),
+		submit:   "save",
+		fields:   fields,
+		validate: validateEditUser,
+	}
+	// Focus whichever field starts under the cursor: a toggle needs no input
+	// focus, but when password is first (MySQL, no toggles) it must accept typing.
+	_ = (&f).syncFocus()
+	return f
+}
+
+// hostNoteFor returns the MySQL host explainer for MySQL/MariaDB, empty otherwise.
+func hostNoteFor(kind db.Kind) string {
+	if kind == db.KindMySQL || kind == db.KindMariaDB {
+		return mysqlHostNote
+	}
+	return ""
 }
 
 func (f formModel) Init() tea.Cmd { return textinput.Blink }
@@ -206,6 +256,9 @@ func (f formModel) toggle(k string) bool {
 
 func (f formModel) View(width int) string {
 	lines := []string{styles.Title.Render(f.title), ""}
+	if f.note != "" {
+		lines = append(lines, styles.Hint.Render(f.note), "")
+	}
 	for i, fld := range f.fields {
 		if !f.visible(i) {
 			continue
@@ -238,7 +291,11 @@ func (f formModel) View(width int) string {
 	default:
 		lines = append(lines, styles.SuccessText.Render("✓ ready"))
 	}
-	lines = append(lines, "", styles.Hint.Render("tab next · space toggle · enter create · esc cancel"))
+	verb := f.submit
+	if verb == "" {
+		verb = "create"
+	}
+	lines = append(lines, "", styles.Hint.Render("tab next · space toggle · enter "+verb+" · esc cancel"))
 	return styles.Screen.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
@@ -279,6 +336,15 @@ func validateCreateUser(f formModel) (errText, warnText string) {
 	}
 	if f.value("password") == "" {
 		return "", "empty password (fine for local dev)"
+	}
+	return "", ""
+}
+
+// validateEditUser allows any edit: a blank password just means "keep the
+// current one", noted as a warning so submit isn't a silent no-op.
+func validateEditUser(f formModel) (errText, warnText string) {
+	if f.value("password") == "" {
+		return "", "password left blank — keeping the current one"
 	}
 	return "", ""
 }

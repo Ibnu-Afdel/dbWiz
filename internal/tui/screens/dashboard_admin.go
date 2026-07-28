@@ -43,7 +43,24 @@ func (s dashboardScreen) openCreateUser() (dashboardScreen, tea.Cmd) {
 		return s, nil
 	}
 	s.mode, s.formPurpose, s.notice = modeForm, purposeCreateUser, ""
-	s.form = newCreateUserForm()
+	s.form = newCreateUserForm(s.engine.Kind())
+	return s, s.form.Init()
+}
+
+// openEditUser opens the edit-user form for the selected user (v2 3.2): role
+// flags where the engine has them, plus a password change. It is a no-op off the
+// users pane or on engines without a user concept.
+func (s dashboardScreen) openEditUser() (dashboardScreen, tea.Cmd) {
+	if !s.caps.Users || s.focus != focusUsers {
+		return s, nil
+	}
+	u, ok := s.selectedUser()
+	if !ok {
+		return s, nil
+	}
+	s.mode, s.formPurpose, s.notice = modeForm, purposeEditUser, ""
+	s.editUserName = u.Name
+	s.form = newEditUserForm(u, s.caps.RoleFlags, s.engine.Kind())
 	return s, s.form.Init()
 }
 
@@ -90,7 +107,7 @@ func (s dashboardScreen) openGrant() (dashboardScreen, tea.Cmd) {
 	for i, d := range s.databases {
 		names[i] = d.Name
 	}
-	s.grant, s.mode, s.notice = newGrant(u.Name, names), modeGrant, ""
+	s.grant, s.mode, s.notice = newGrant(u.Name, s.engine.DatabasePrivileges(), names), modeGrant, ""
 	return s, nil
 }
 
@@ -130,21 +147,111 @@ func (s dashboardScreen) handleOverlayKey(msg tea.KeyPressMsg) (dashboardScreen,
 		case grantCanceled:
 			s.mode = modeBrowse
 			return s, nil
-		case grantChosen:
-			target := s.grant.choice()
-			s.mode, s.working = modeBrowse, true
-			return s, tea.Batch(s.spinner.Tick, grantCmd(s.engine, s.grant.subject, target, s.grant.grant))
+		case grantPickDB:
+			// Descended into the matrix — load this user's current grants for the
+			// chosen database. The overlay is showing its own loading state.
+			return s, loadGrantsCmd(s.engine, s.grant.subject, s.grant.database)
+		case grantToggle:
+			return s, setGrantCmd(s.engine, s.grant.subject, s.grant.database, s.grant.pendingPriv, s.grant.pendingGrant)
 		}
 		return s, nil
+	case modeExport:
+		var res exportResult
+		s.export, res = s.export.update(msg)
+		switch res {
+		case exportCanceled:
+			s.mode = modeBrowse
+			return s, nil
+		case exportChosen:
+			s.mode = modeBrowse
+			cols, rows := s.currentGrid()
+			return s, exportChosenCmd(s.export.choice, s.exportBase(), s.export.dir, cols, rows)
+		}
+		return s, nil
+	case modeComplete:
+		var res completeResult
+		var cmd tea.Cmd
+		s.completeList, res, cmd = s.completeList.update(msg)
+		switch res {
+		case completeCanceled:
+			s.mode = modeBrowse
+			return s, s.editor.Focus()
+		case completeAccepted:
+			if it, ok := s.completeList.selected(); ok {
+				return s.acceptCompletion(it.text)
+			}
+			s.mode = modeBrowse
+			return s, s.editor.Focus()
+		}
+		return s, cmd
 	case modeCell:
 		return s.updateCell(msg)
+	case modeSaved:
+		var res savedResult
+		var cmd tea.Cmd
+		s.savedList, res, cmd = s.savedList.update(msg)
+		switch res {
+		case savedCanceled:
+			s.mode = modeBrowse
+			return s, nil
+		case savedPicked:
+			s.mode = modeBrowse
+			if it, ok := s.savedList.selected(); ok {
+				// Load into the editor, focused, so the user tweaks before running —
+				// picking never auto-runs, exactly like the history overlay.
+				s.editor.SetValue(it.sql)
+				s.editor.MoveToEnd()
+				s.focus = focusEditor
+				return s, s.syncEditorFocus()
+			}
+			return s, nil
+		case savedDelete:
+			if it, ok := s.savedList.selected(); ok {
+				key := s.historyKey
+				if it.scope == scopeGlobal {
+					key = ""
+				}
+				// Delete off the Update goroutine; the reply carries the refreshed list
+				// so the row disappears (or the overlay closes if it was the last one).
+				return s, deleteSavedCmd(key, it.name, s.historyKey)
+			}
+			return s, nil
+		}
+		return s, cmd
+	case modeHistory:
+		var res historyResult
+		var cmd tea.Cmd
+		s.historyList, res, cmd = s.historyList.update(msg)
+		switch res {
+		case historyCanceled:
+			s.mode = modeBrowse
+			return s, nil
+		case historyPicked:
+			s.mode = modeBrowse
+			if sql, ok := s.historyList.selected(); ok {
+				// Load into the editor, focused, so the user tweaks before running —
+				// picking never auto-runs (confirmed with Ibnu).
+				s.editor.SetValue(sql)
+				s.editor.MoveToEnd()
+				s.focus = focusEditor
+				return s, s.syncEditorFocus()
+			}
+			return s, nil
+		}
+		return s, cmd
 	}
 	return s, nil
 }
 
-// submitForm runs the create command a validated form represents.
+// submitForm runs the command a validated form represents. Saving a query is a
+// local write handled inline (no server round-trip, so no "working…" spinner);
+// the create/edit purposes flip working on and dispatch an async mutation.
 func (s dashboardScreen) submitForm() (dashboardScreen, tea.Cmd) {
-	s.mode, s.working = modeBrowse, true
+	s.mode = modeBrowse
+	if s.formPurpose == purposeSaveQuery {
+		return s.saveQueryFromForm()
+	}
+	s.working = true
 	switch s.formPurpose {
 	case purposeCreateDB:
 		return s, tea.Batch(s.spinner.Tick, createDatabaseCmd(
@@ -152,6 +259,10 @@ func (s dashboardScreen) submitForm() (dashboardScreen, tea.Cmd) {
 	case purposeCreateUser:
 		return s, tea.Batch(s.spinner.Tick, createUserCmd(
 			s.engine, s.form.value("name"), s.form.value("password")))
+	case purposeEditUser:
+		return s, tea.Batch(s.spinner.Tick, alterUserCmd(
+			s.engine, s.editUserName, s.caps.RoleFlags,
+			s.form.toggle("canLogin"), s.form.toggle("createDB"), s.form.value("password")))
 	}
 	return s, nil
 }

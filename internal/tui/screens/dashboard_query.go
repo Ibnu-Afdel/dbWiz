@@ -49,6 +49,10 @@ func (s dashboardScreen) focusEditor() (dashboardScreen, tea.Cmd) {
 // the cursor animating while editing.
 func (s *dashboardScreen) syncEditorFocus() tea.Cmd {
 	if s.focus == focusEditor && !s.querying {
+		// (Re)entering the editor lands in normal mode when vim is on — this is the
+		// single choke point every editor-entry path funnels through, so a fresh
+		// entry is always modal (v2 2.4). A no-op when vim is disabled.
+		s.vim = s.vim.toNormal()
 		return s.editor.Focus()
 	}
 	s.editor.Blur()
@@ -68,6 +72,8 @@ func (s *dashboardScreen) resizeEditor() {
 // history, or otherwise edit the textarea. Plain enter inserts a newline (the
 // editor is multi-line); run is the distinct ctrl+enter / F5 (Step 7.2).
 func (s dashboardScreen) handleEditorKey(msg tea.KeyPressMsg) (dashboardScreen, tea.Cmd) {
+	// These app-level keys work in both the plain and modal editors. They're all
+	// modifier/function combos, so they never clash with a vim normal-mode letter.
 	switch {
 	case key.Matches(msg, Keys.Run):
 		return s.runQuery()
@@ -76,6 +82,32 @@ func (s dashboardScreen) handleEditorKey(msg tea.KeyPressMsg) (dashboardScreen, 
 		// isn't a code formatter.
 		s.focus = s.nextFocus()
 		return s, s.syncEditorFocus()
+	case key.Matches(msg, Keys.HistoryList):
+		// Checked before the textarea fall-through so alt+h opens the search overlay
+		// instead of typing.
+		return s.openHistory()
+	case key.Matches(msg, Keys.SaveQuery):
+		// alt+w saves the statement under a name; checked before the fall-through so
+		// the modifier combo doesn't reach the textarea as text.
+		return s.openSaveQuery()
+	case key.Matches(msg, Keys.SavedList):
+		return s.openSaved()
+	case key.Matches(msg, Keys.Export):
+		// Export the last result without leaving the editor — handy right after a
+		// run. Checked before the fall-through so alt+e doesn't reach the textarea.
+		return s.openExport()
+	case key.Matches(msg, Keys.Complete):
+		// Schema-aware autocomplete for the word under the cursor (v2 2.5).
+		return s.openComplete()
+	}
+	// The modal editor owns esc (insert→normal, normal→leave), the history cycle,
+	// motions, and typing (v2 2.4).
+	if s.vim.enabled {
+		return s.handleVimEditorKey(msg)
+	}
+	// Plain editor (default): esc leaves for the navigator, ctrl+p/n cycle history,
+	// everything else is text.
+	switch {
 	case key.Matches(msg, Keys.Back):
 		// esc leaves the editor for the navigator rather than backing out of the
 		// dashboard — exiting the whole screen is [b].
@@ -111,7 +143,13 @@ func (s dashboardScreen) runQuery() (dashboardScreen, tea.Cmd) {
 	s.queryStart = time.Now()
 	s.queryErr = nil
 	s.editor.Blur()
-	return s, tea.Batch(s.spinner.Tick, runQueryCmd(ctx, s.engine, sql, s.querySeq, firstKeyword(sql)))
+	return s, tea.Batch(
+		s.spinner.Tick,
+		runQueryCmd(ctx, s.engine, sql, s.querySeq, firstKeyword(sql)),
+		// Persist the statement to the cross-session store (v2 2.1); best-effort and
+		// off the Update goroutine so it never blocks the run.
+		persistHistoryCmd(s.historyKey, sql),
+	)
 }
 
 // cancelQuery cancels the in-flight statement. The cancellation propagates

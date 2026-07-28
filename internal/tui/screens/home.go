@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/lipgloss/v2"
 
+	"github.com/Ibnu-Afdel/dbwiz/internal/config"
 	"github.com/Ibnu-Afdel/dbwiz/internal/docker"
 	"github.com/Ibnu-Afdel/dbwiz/internal/state"
 	"github.com/Ibnu-Afdel/dbwiz/internal/tui/styles"
@@ -25,6 +26,7 @@ type homeChoice int
 const (
 	choiceContinue homeChoice = iota
 	choiceExisting
+	choiceSaved
 	choiceCreate
 	choiceSQLite
 	choiceRescan
@@ -36,6 +38,8 @@ func (c homeChoice) label() string {
 		return "Continue where you left off"
 	case choiceExisting:
 		return "Use an existing database"
+	case choiceSaved:
+		return "Connect to a saved target…"
 	case choiceCreate:
 		return "Create a new database…"
 	case choiceSQLite:
@@ -60,6 +64,7 @@ type continueTarget struct {
 type homeScreen struct {
 	containers []docker.Container
 	cont       *continueTarget
+	saved      []config.ManualTarget // saved manual targets from config (v2 3.3)
 	choices    []homeChoice
 	cursor     int
 
@@ -82,12 +87,19 @@ func NewHomeContinuing(containers []docker.Container) Screen {
 func newHome(containers []docker.Container, cont *continueTarget) Screen {
 	sp := spinner.New(spinner.WithSpinner(spinner.Dot))
 	sp.Style = styles.Selected
+	saved := SavedTargets()
 	choices := []homeChoice{}
 	if cont != nil {
 		choices = append(choices, choiceContinue)
 	}
-	choices = append(choices, choiceExisting, choiceCreate, choiceSQLite, choiceRescan)
-	return homeScreen{containers: containers, cont: cont, choices: choices, spinner: sp}
+	choices = append(choices, choiceExisting)
+	// The saved-target row appears only when config actually defines one, so the
+	// menu stays lean for the Docker-only case (v2 3.3).
+	if len(saved) > 0 {
+		choices = append(choices, choiceSaved)
+	}
+	choices = append(choices, choiceCreate, choiceSQLite, choiceRescan)
+	return homeScreen{containers: containers, cont: cont, saved: saved, choices: choices, spinner: sp}
 }
 
 // resolveContinue turns the remembered last target into a selectable option, but
@@ -172,6 +184,8 @@ func (s homeScreen) choose() (Screen, tea.Cmd) {
 		}
 	case choiceExisting:
 		return s, existingRoute(s.containers)
+	case choiceSaved:
+		return s, savedRoute(s.saved)
 	case choiceCreate:
 		return s, createRoute(s.containers)
 	case choiceSQLite:
@@ -243,6 +257,8 @@ func (s homeScreen) choiceDetail(c homeChoice) string {
 			return "(no running containers — start one below)"
 		}
 		return fmt.Sprintf("(%d running)", running)
+	case choiceSaved:
+		return fmt.Sprintf("(%d saved)", len(s.saved))
 	case choiceCreate:
 		return "(create + connect in one flow)"
 	case choiceSQLite:

@@ -170,6 +170,14 @@ func (s dashboardScreen) renderOverlay(width, height int) string {
 		body = s.confirm.View(width)
 	case modeGrant:
 		body = s.grant.View(width)
+	case modeHistory:
+		body = s.historyList.View(width)
+	case modeSaved:
+		body = s.savedList.View(width)
+	case modeExport:
+		body = s.export.View(width)
+	case modeComplete:
+		body = s.completeList.View(width)
 	case modeCell:
 		return s.renderCellOverlay(width, height)
 	}
@@ -264,6 +272,13 @@ func (s dashboardScreen) editorStatus(innerW int) string {
 			msg += " — " + s.queryErr.Detail
 		}
 		return fitLine(styles.DangerText.Render("⚠ "+msg), innerW)
+	case s.vim.enabled && s.focus == focusEditor:
+		// Modal editor: show the current mode and its key hints (v2 2.4).
+		tag, style, hint := "-- NORMAL --", styles.SuccessText, "i insert · hjkl move · dd/x edit · ^R/F5 run · esc leave"
+		if s.vim.mode == editorInsert {
+			tag, style, hint = "-- INSERT --", styles.WarningText, "esc normal · Ctrl+R / F5 run"
+		}
+		return fitLine(style.Render(tag)+"  "+styles.Hint.Render(hint), innerW)
 	default:
 		return fitLine(styles.Hint.Render("Ctrl+R / F5 run · ^p/^n history · esc leave"), innerW)
 	}

@@ -3,13 +3,16 @@ package screens
 import (
 	"context"
 	"errors"
-	"os"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/Ibnu-Afdel/dbwiz/internal/config"
+	"github.com/Ibnu-Afdel/dbwiz/internal/connect"
 	"github.com/Ibnu-Afdel/dbwiz/internal/db"
+	"github.com/Ibnu-Afdel/dbwiz/internal/debuglog"
 	"github.com/Ibnu-Afdel/dbwiz/internal/docker"
+	"github.com/Ibnu-Afdel/dbwiz/internal/state"
 )
 
 // connectTimeout bounds a single connection attempt so a wedged server surfaces
@@ -107,6 +110,25 @@ type (
 	}
 	adminErrMsg struct{ err *db.DBError }
 
+	// Grant matrix (v2 3.1). grantsLoadedMsg carries a user's current privileges
+	// on a database into the open matrix; grantSetMsg acknowledges one applied
+	// grant/revoke; grantsErrMsg is a typed failure of either, shown inline in the
+	// overlay. Each carries the user+database it was requested for so a late reply
+	// for a since-changed selection is dropped.
+	grantsLoadedMsg struct {
+		user, database string
+		held           []db.Privilege
+	}
+	grantSetMsg struct {
+		user, database string
+		priv           db.Privilege
+		grant          bool
+	}
+	grantsErrMsg struct {
+		user, database string
+		err            *db.DBError
+	}
+
 	// Query (Phase 7) results. Each carries the seq it was launched with so a
 	// late reply for a superseded (re-run or cancelled) statement is dropped
 	// instead of clobbering the current one. verb is the statement's leading
@@ -120,6 +142,20 @@ type (
 		seq int
 		err *db.DBError
 	}
+
+	// historyPersistedMsg acknowledges a best-effort history write. It carries
+	// nothing — the dashboard ignores it — but lets the persist run as a proper
+	// tea.Cmd off the Update goroutine.
+	historyPersistedMsg struct{}
+
+	// savedPersistedMsg acknowledges a best-effort saved-query write, like
+	// historyPersistedMsg. The dashboard ignores it.
+	savedPersistedMsg struct{}
+
+	// savedDeletedMsg carries the saved-query list refreshed after a delete (read
+	// off the Update goroutine), so the open picker can rebuild — or close, when
+	// the last entry is gone — without a second store read on the UI thread.
+	savedDeletedMsg struct{ items []savedQueryItem }
 )
 
 // runQueryCmd executes an arbitrary statement off the Update goroutine. The
@@ -134,6 +170,42 @@ func runQueryCmd(ctx context.Context, engine db.Engine, sql string, seq int, ver
 			return queryErrMsg{seq: seq, err: asDBError(err)}
 		}
 		return queryDoneMsg{seq: seq, verb: verb, result: res}
+	}
+}
+
+// persistHistoryCmd writes a just-run statement to the cross-session history
+// store off the Update goroutine (protocol #4: never block Update on I/O). It's
+// best-effort — history is disposable cache, so a write failure is swallowed and
+// reported as a no-op message the dashboard ignores.
+func persistHistoryCmd(key, sql string) tea.Cmd {
+	return func() tea.Msg {
+		// Redact any PASSWORD / IDENTIFIED BY literal before it lands on disk, the
+		// same structural guarantee the debug log makes (v1 8.4): DBWiz never writes
+		// a password to a file. The in-memory session ring keeps the raw text, so
+		// same-session recall stays exact; only the persisted copy is masked.
+		_ = state.AddHistory(key, debuglog.Redact(sql))
+		return historyPersistedMsg{}
+	}
+}
+
+// persistSavedCmd writes a named query to the cross-session store off the Update
+// goroutine (protocol #4). Like history it redacts any PASSWORD / IDENTIFIED BY
+// literal first, upholding "DBWiz never writes a password to a file" (v1 8.4). An
+// empty key targets the global scope. Best-effort: a write failure is swallowed.
+func persistSavedCmd(key, name, sql string) tea.Cmd {
+	return func() tea.Msg {
+		_ = state.AddSaved(key, name, debuglog.Redact(sql))
+		return savedPersistedMsg{}
+	}
+}
+
+// deleteSavedCmd forgets a named query from scope (empty key = global) and reads
+// back the picker's refreshed items for curKey off the Update goroutine, so the
+// open overlay can rebuild from a single, consistent snapshot.
+func deleteSavedCmd(key, name, curKey string) tea.Cmd {
+	return func() tea.Msg {
+		_ = state.DeleteSaved(key, name)
+		return savedDeletedMsg{items: collectSaved(curKey)}
 	}
 }
 
@@ -217,6 +289,28 @@ func createUserCmd(engine db.Engine, name, password string) tea.Cmd {
 	}
 }
 
+// alterUserCmd applies an edit-user form (v2 3.2): it sets role flags first
+// (only where the engine has them) then changes the password when one was typed
+// (a blank password leaves the current one untouched). It stops at the first
+// failure so a partial result is reported clearly.
+func alterUserCmd(engine db.Engine, name string, hasFlags bool, canLogin, createDB bool, password string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), browseTimeout)
+		defer cancel()
+		if hasFlags {
+			if err := engine.AlterUser(ctx, name, canLogin, createDB); err != nil {
+				return adminErrMsg{err: asDBError(err)}
+			}
+		}
+		if password != "" {
+			if err := engine.SetPassword(ctx, name, password); err != nil {
+				return adminErrMsg{err: asDBError(err)}
+			}
+		}
+		return adminDoneMsg{notice: "Updated user " + name, reloadUsers: true}
+	}
+}
+
 // dropUserCmd drops a user. A dependent-objects failure (Postgres) comes back
 // typed, so the caller renders plain-language text rather than a raw code.
 func dropUserCmd(engine db.Engine, name string) tea.Cmd {
@@ -230,23 +324,31 @@ func dropUserCmd(engine db.Engine, name string) tea.Cmd {
 	}
 }
 
-// grantCmd grants or revokes ALL for a user on a database (v1's coarse level).
-func grantCmd(engine db.Engine, user, database string, grant bool) tea.Cmd {
+// loadGrantsCmd reads which database-scope privileges user currently holds on
+// database, feeding the grant matrix (v2 3.1).
+func loadGrantsCmd(engine db.Engine, user, database string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), browseTimeout)
 		defer cancel()
-		var err error
-		verb := "Granted"
-		if grant {
-			err = engine.Grant(ctx, user, database, db.GrantAll)
-		} else {
-			err = engine.Revoke(ctx, user, database, db.GrantAll)
-			verb = "Revoked"
-		}
+		held, err := engine.ListGrants(ctx, user, database)
 		if err != nil {
-			return adminErrMsg{err: asDBError(err)}
+			return grantsErrMsg{user: user, database: database, err: asDBError(err)}
 		}
-		return adminDoneMsg{notice: verb + " " + user + " on " + database}
+		return grantsLoadedMsg{user: user, database: database, held: held}
+	}
+}
+
+// setGrantCmd grants or revokes a single privilege for user on database. On
+// success it reports grantSetMsg; the dashboard then reloads the matrix so the
+// checkmarks reflect what the server actually did.
+func setGrantCmd(engine db.Engine, user, database string, priv db.Privilege, grant bool) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), browseTimeout)
+		defer cancel()
+		if err := engine.SetGrant(ctx, user, database, priv, grant); err != nil {
+			return grantsErrMsg{user: user, database: database, err: asDBError(err)}
+		}
+		return grantSetMsg{user: user, database: database, priv: priv, grant: grant}
 	}
 }
 
@@ -256,8 +358,96 @@ func grantCmd(engine db.Engine, user, database string, grant bool) tea.Cmd {
 const browseTimeout = 15 * time.Second
 
 // previewLimit caps how many rows a table preview pulls, keeping the preview
-// snappy on large tables.
-const previewLimit = 200
+// snappy on large tables. It defaults to 200 and is overridden by
+// config.DefaultRowLimit via ApplyConfig (v2 3.3).
+var previewLimit = 200
+
+// savedTargets holds the valid manual (non-Docker) targets from config, offered
+// on the home menu (v2 3.3). ApplyConfig populates it; it is empty with no config.
+var savedTargets []config.ManualTarget
+
+// vimEditor turns on the modal SQL editor (v2 2.4). It defaults off (the plain
+// textarea) and is set from config.Editor.Vim via ApplyConfig, so every new
+// dashboard reads one shared preference.
+var vimEditor bool
+
+// ApplyConfig folds the user's opt-in config into the screens layer at startup:
+// the preview row cap, the saved manual targets, and the editor mode. It is
+// called once from tui.Run before the program starts; with no config it is a
+// harmless no-op.
+func ApplyConfig(cfg config.Config) {
+	if cfg.DefaultRowLimit > 0 {
+		previewLimit = cfg.DefaultRowLimit
+	}
+	savedTargets = cfg.ValidTargets()
+	vimEditor = cfg.Editor.Vim
+}
+
+// SavedTargets returns the configured manual targets (v2 3.3), for the home menu.
+func SavedTargets() []config.ManualTarget { return savedTargets }
+
+// manualKind maps a saved target's engine string to a db.Kind. The set matches
+// config.knownEngines; an unknown string returns ok=false.
+func manualKind(engine string) (db.Kind, bool) {
+	switch engine {
+	case "postgres":
+		return db.KindPostgres, true
+	case "mysql":
+		return db.KindMySQL, true
+	case "mariadb":
+		return db.KindMariaDB, true
+	}
+	return 0, false
+}
+
+// dockerEngineOf is the reverse of kindOf, used to label a manual target with a
+// docker.Engine so the dashboard's tab/title code (which expects a container)
+// works unchanged.
+func dockerEngineOf(k db.Kind) docker.Engine {
+	switch k {
+	case db.KindMySQL:
+		return docker.EngineMySQL
+	case db.KindMariaDB:
+		return docker.EngineMariaDB
+	default:
+		return docker.EnginePostgres
+	}
+}
+
+// manualContainer synthesizes the docker.Container a manual connection hands to
+// the dashboard for its label — there is no real container, just enough for the
+// tab title and status bar.
+func manualContainer(name string, kind db.Kind, port int) docker.Container {
+	return docker.Container{Name: name, Engine: dockerEngineOf(kind), State: docker.StateRunning, HostPort: port}
+}
+
+// connectManualCmd opens a live engine for a saved manual target (v2 3.3). Unlike
+// connectCmd it runs no credential ladder — a manual target carries its own
+// host/port/user and DBWiz always prompts for the password — so the flow is just
+// connect, and on an auth rejection drop to the password prompt.
+func connectManualCmd(name string, kind db.Kind, base db.Target, prompted db.Target, hasPrompt bool) tea.Cmd {
+	return func() tea.Msg {
+		target := base
+		if hasPrompt {
+			target.Password = prompted.Password
+		}
+		engine, err := NewEngineFn(kind)
+		if err != nil {
+			return connectErrMsg{err: err}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
+		defer cancel()
+		if err := engine.Connect(ctx, target); err != nil {
+			_ = engine.Close()
+			var dberr *db.DBError
+			if errors.As(err, &dberr) && dberr.Kind == db.DBErrAuthFailed {
+				return connectAuthMsg{target: target}
+			}
+			return connectErrMsg{err: err}
+		}
+		return connectedMsg{engine: engine, target: target, container: manualContainer(name, kind, target.Port)}
+	}
+}
 
 // loadDatabasesCmd lists the engine's databases off the Update goroutine.
 func loadDatabasesCmd(engine db.Engine) tea.Cmd {
@@ -345,12 +535,12 @@ func startCmd(c docker.Container) tea.Cmd {
 // this is how a wrong password loops the prompt instead of dead-ending.
 func connectCmd(c docker.Container, prompted db.Target, hasPrompt bool) tea.Cmd {
 	return func() tea.Msg {
-		kind, ok := kindOf(c.Engine)
+		kind, ok := connect.KindOf(c.Engine)
 		if !ok {
 			return connectErrMsg{err: errors.New("unsupported engine for " + c.Name)}
 		}
 
-		target := resolveTarget(c, kind)
+		target := connect.Target(context.Background(), c, kind)
 		if hasPrompt {
 			if prompted.User != "" {
 				target.User = prompted.User
@@ -378,95 +568,6 @@ func connectCmd(c docker.Container, prompted db.Target, hasPrompt bool) tea.Cmd 
 	}
 }
 
-// resolveTarget builds the connection target from the non-interactive rungs of
-// the ladder: Omarchy defaults (already on the container when detected) →
-// docker inspect env → the cwd .env file. Later rungs only fill gaps left by
-// earlier ones. Engine defaults backfill a user/maintenance-db when nothing
-// recovered one.
-func resolveTarget(c docker.Container, kind db.Kind) db.Target {
-	creds := c.Creds
-	port := c.HostPort
-
-	// Rung 2: docker inspect env — recovers a port and/or creds we don't have.
-	if creds.User == "" || creds.Password == "" || port == 0 {
-		if p, ic, err := docker.Inspect(context.Background(), c.Name, c.Engine); err == nil {
-			if port == 0 {
-				port = p
-			}
-			creds = mergeCreds(creds, ic)
-		}
-	}
-
-	// Rung 3: a .env / DATABASE_URL in the working directory.
-	if creds.User == "" || creds.Password == "" {
-		if hint, ok := docker.ReadEnvFile(cwd()); ok {
-			creds = mergeCreds(creds, docker.Creds{
-				User:     hint.User,
-				Password: hint.Password,
-				Database: hint.Database,
-			})
-		}
-	}
-
-	target := db.Target{
-		Host:     "127.0.0.1",
-		Port:     port,
-		User:     creds.User,
-		Password: creds.Password,
-		Database: creds.Database,
-	}
-	applyEngineDefaults(&target, kind)
-	return target
-}
-
-// mergeCreds fills empty fields of base from extra without overwriting anything
-// base already recovered from a higher-priority rung.
-func mergeCreds(base, extra docker.Creds) docker.Creds {
-	if base.User == "" {
-		base.User = extra.User
-	}
-	if base.Password == "" {
-		base.Password = extra.Password
-	}
-	if base.Database == "" {
-		base.Database = extra.Database
-	}
-	return base
-}
-
-// applyEngineDefaults backfills the conventional admin user and maintenance
-// database when the ladder recovered none, so an Omarchy-less container can
-// still connect without prompting for a username.
-func applyEngineDefaults(t *db.Target, kind db.Kind) {
-	switch kind {
-	case db.KindPostgres:
-		if t.User == "" {
-			t.User = "postgres"
-		}
-		if t.Database == "" {
-			t.Database = "postgres"
-		}
-	case db.KindMySQL, db.KindMariaDB:
-		if t.User == "" {
-			t.User = "root"
-		}
-	}
-}
-
-// kindOf maps a detected docker engine to the db engine kind. SQLite is never
-// produced by container detection, so it has no mapping here.
-func kindOf(e docker.Engine) (db.Kind, bool) {
-	switch e {
-	case docker.EnginePostgres:
-		return db.KindPostgres, true
-	case docker.EngineMySQL:
-		return db.KindMySQL, true
-	case docker.EngineMariaDB:
-		return db.KindMariaDB, true
-	}
-	return 0, false
-}
-
 // asDockerError recovers the typed *docker.DockerError from an error, falling
 // back to a generic internal error so the error screen always has a kind.
 func asDockerError(err error) *docker.DockerError {
@@ -481,13 +582,4 @@ func asDockerError(err error) *docker.DockerError {
 		Hint:   "press [r] to retry",
 		Err:    err,
 	}
-}
-
-// cwd returns the working directory, or "." when it can't be determined, so the
-// .env rung degrades gracefully.
-func cwd() string {
-	if d, err := os.Getwd(); err == nil {
-		return d
-	}
-	return "."
 }

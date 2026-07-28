@@ -7,6 +7,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -14,6 +15,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
 
+	"github.com/Ibnu-Afdel/dbwiz/internal/config"
 	"github.com/Ibnu-Afdel/dbwiz/internal/tui/screens"
 	"github.com/Ibnu-Afdel/dbwiz/internal/tui/styles"
 )
@@ -286,8 +288,18 @@ func tabDigit(msg tea.KeyPressMsg) (int, bool) {
 
 // Run starts the Bubble Tea program and blocks until the user exits. It is the
 // single entry point main.go calls when dbwiz is invoked with no subcommand.
+// Before starting it folds in the user's opt-in config (v2 3.3): a theme and row
+// limit, plus any saved manual targets for the home menu. A malformed config is
+// warned about, not fatal — the app still launches with defaults.
 func Run() error {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "dbwiz: "+err.Error())
+	}
+	styles.Apply(cfg.Theme)
+	screens.ApplyConfig(cfg)
+
 	p := tea.NewProgram(newModel())
-	_, err := p.Run()
+	_, err = p.Run()
 	return err
 }

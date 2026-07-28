@@ -79,6 +79,17 @@ func (e *teatestEngine) CreateDatabase(context.Context, string, db.CreateOpts) e
 func (e *teatestEngine) DropDatabase(context.Context, string) error                  { return nil }
 func (e *teatestEngine) Grant(context.Context, string, string, db.GrantLevel) error  { return nil }
 func (e *teatestEngine) Revoke(context.Context, string, string, db.GrantLevel) error { return nil }
+func (e *teatestEngine) AlterUser(context.Context, string, bool, bool) error         { return nil }
+func (e *teatestEngine) SetPassword(context.Context, string, string) error           { return nil }
+func (e *teatestEngine) DatabasePrivileges() []db.Privilege {
+	return []db.Privilege{db.PrivConnect, db.PrivCreate, db.PrivTemporary}
+}
+func (e *teatestEngine) ListGrants(context.Context, string, string) ([]db.Privilege, error) {
+	return []db.Privilege{db.PrivConnect}, nil
+}
+func (e *teatestEngine) SetGrant(context.Context, string, string, db.Privilege, bool) error {
+	return nil
+}
 func (e *teatestEngine) Query(context.Context, string) (db.Result, error) {
 	return db.Result{Columns: []string{"answer"}, Rows: [][]any{{"ANSWER_42"}}}, nil
 }

@@ -44,7 +44,7 @@ func (p *Postgres) wrap(err error) error {
 }
 
 func (p *Postgres) Capabilities() Capabilities {
-	return Capabilities{Users: true, Grants: true, MultipleDatabases: true}
+	return Capabilities{Users: true, Grants: true, MultipleDatabases: true, RoleFlags: true}
 }
 
 // Connect opens the single pool to target. When target.Database is empty it
@@ -288,8 +288,10 @@ func (p *Postgres) DropDatabase(ctx context.Context, name string) error {
 }
 
 func (p *Postgres) ListUsers(ctx context.Context) ([]User, error) {
-	// Login roles only, excluding the built-in pg_* roles.
-	const q = `SELECT rolname FROM pg_catalog.pg_roles
+	// Login roles only, excluding the built-in pg_* roles. rolcreatedb rides along
+	// so the edit-user form (v2 3.2) can show the current CREATEDB flag; rolcanlogin
+	// is true for every row here by construction.
+	const q = `SELECT rolname, rolcanlogin, rolcreatedb FROM pg_catalog.pg_roles
 	           WHERE rolcanlogin = true AND rolname NOT LIKE 'pg_%'
 	           ORDER BY rolname`
 	rows, err := p.pool.QueryContext(ctx, q)
@@ -300,7 +302,7 @@ func (p *Postgres) ListUsers(ctx context.Context) ([]User, error) {
 	var out []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.Name); err != nil {
+		if err := rows.Scan(&u.Name, &u.CanLogin, &u.CreateDB); err != nil {
 			return nil, classifyPostgres(err)
 		}
 		out = append(out, u)
@@ -334,6 +336,40 @@ func (p *Postgres) DropUser(ctx context.Context, name string) error {
 	return nil
 }
 
+// AlterUser sets the role's LOGIN and CREATEDB flags (v2 3.2). Both are always
+// written (there is no partial state to preserve), so the statement reads e.g.
+// ALTER ROLE "app" LOGIN NOCREATEDB.
+func (p *Postgres) AlterUser(ctx context.Context, name string, canLogin, createDB bool) error {
+	if err := validateIdent(name); err != nil {
+		return err
+	}
+	login, cdb := "NOLOGIN", "NOCREATEDB"
+	if canLogin {
+		login = "LOGIN"
+	}
+	if createDB {
+		cdb = "CREATEDB"
+	}
+	stmt := fmt.Sprintf("ALTER ROLE %s %s %s", quotePGIdent(name), login, cdb)
+	if _, err := p.pool.ExecContext(ctx, stmt); err != nil {
+		return classifyPostgres(err)
+	}
+	return nil
+}
+
+// SetPassword changes an existing role's password. The password is a literal
+// that can't be parameterised in DDL, so quotePGLiteral escapes it.
+func (p *Postgres) SetPassword(ctx context.Context, name, password string) error {
+	if err := validateIdent(name); err != nil {
+		return err
+	}
+	stmt := "ALTER ROLE " + quotePGIdent(name) + " PASSWORD " + quotePGLiteral(password)
+	if _, err := p.pool.ExecContext(ctx, stmt); err != nil {
+		return classifyPostgres(err)
+	}
+	return nil
+}
+
 func (p *Postgres) Grant(ctx context.Context, user, database string, level GrantLevel) error {
 	return p.grantRevoke(ctx, true, user, database)
 }
@@ -359,6 +395,62 @@ func (p *Postgres) grantRevoke(ctx context.Context, grant bool, user, database s
 	} else {
 		stmt = fmt.Sprintf("REVOKE ALL PRIVILEGES ON DATABASE %s FROM %s",
 			quotePGIdent(database), quotePGIdent(user))
+	}
+	if _, err := p.pool.ExecContext(ctx, stmt); err != nil {
+		return classifyPostgres(err)
+	}
+	return nil
+}
+
+func (p *Postgres) DatabasePrivileges() []Privilege { return pgDatabasePrivileges }
+
+// ListGrants reports which database-scope privileges user effectively holds on
+// database. It asks the server directly via has_database_privilege, so the
+// answer includes privileges reached through PUBLIC or role membership, not just
+// direct grants — the honest "who can do what" picture.
+func (p *Postgres) ListGrants(ctx context.Context, user, database string) ([]Privilege, error) {
+	if err := validateIdent(user); err != nil {
+		return nil, err
+	}
+	if err := validateIdent(database); err != nil {
+		return nil, err
+	}
+	var held []Privilege
+	for _, pr := range pgDatabasePrivileges {
+		var ok bool
+		// user, database and the privilege name are all bound parameters here — no
+		// interpolation, so this read needs no quoting.
+		if err := p.pool.QueryRowContext(ctx,
+			"SELECT has_database_privilege($1, $2, $3)", user, database, string(pr)).Scan(&ok); err != nil {
+			return nil, classifyPostgres(err)
+		}
+		if ok {
+			held = append(held, pr)
+		}
+	}
+	return held, nil
+}
+
+// SetGrant grants or revokes one database-scope privilege for user on database.
+func (p *Postgres) SetGrant(ctx context.Context, user, database string, priv Privilege, grant bool) error {
+	if err := validateIdent(user); err != nil {
+		return err
+	}
+	if err := validateIdent(database); err != nil {
+		return err
+	}
+	if !knownPrivilege(pgDatabasePrivileges, priv) {
+		return errInvalidPrivilege(priv)
+	}
+	// priv is whitelisted above (so interpolating the keyword is safe); the
+	// identifiers are quoted.
+	var stmt string
+	if grant {
+		stmt = fmt.Sprintf("GRANT %s ON DATABASE %s TO %s",
+			string(priv), quotePGIdent(database), quotePGIdent(user))
+	} else {
+		stmt = fmt.Sprintf("REVOKE %s ON DATABASE %s FROM %s",
+			string(priv), quotePGIdent(database), quotePGIdent(user))
 	}
 	if _, err := p.pool.ExecContext(ctx, stmt); err != nil {
 		return classifyPostgres(err)
