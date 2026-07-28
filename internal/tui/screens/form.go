@@ -22,18 +22,21 @@ const (
 	formSubmitted                   // enter on a valid form
 )
 
-// formFieldKind distinguishes a text input from a boolean toggle.
+// formFieldKind distinguishes a text input, a boolean toggle, and a one-of-many
+// choice (cycled left/right or with space).
 type formFieldKind int
 
 const (
 	fieldText formFieldKind = iota
 	fieldToggle
+	fieldChoice
 )
 
-// formField is one row of a form: a text input or a toggle. dependsOn names a
-// toggle field's key; when set, this field is only shown (and validated) while
-// that toggle is on — that's how the create-database form reveals the password
-// field only after "also create a user" is switched on.
+// formField is one row of a form: a text input, a toggle, or a choice. dependsOn
+// names a toggle field's key; when set, this field is only shown (and validated)
+// while that toggle is on — that's how the create-database form reveals the
+// password field only after "also create a user" is switched on. choices/sel back
+// a fieldChoice: the offered values and the index of the selected one.
 type formField struct {
 	key       string
 	label     string
@@ -41,6 +44,8 @@ type formField struct {
 	input     textinput.Model
 	on        bool
 	dependsOn string
+	choices   []string
+	sel       int
 }
 
 // formModel is a small keyboard-driven form used for the admin create flows
@@ -182,9 +187,24 @@ func (f formModel) update(msg tea.KeyPressMsg) (formModel, formResult, tea.Cmd) 
 		f.focusNext(-1)
 		return f, formPending, f.syncFocus()
 	case " ", "space":
-		if f.fields[f.focus].kind == fieldToggle {
+		switch f.fields[f.focus].kind {
+		case fieldToggle:
 			f.fields[f.focus].on = !f.fields[f.focus].on
 			return f, formPending, f.syncFocus()
+		case fieldChoice:
+			f.cycleChoice(+1)
+			return f, formPending, nil
+		}
+	case "left", "right":
+		// Cycle a focused choice; for a text field fall through so left/right still
+		// move the cursor.
+		if f.fields[f.focus].kind == fieldChoice {
+			dir := +1
+			if msg.String() == "left" {
+				dir = -1
+			}
+			f.cycleChoice(dir)
+			return f, formPending, nil
 		}
 	}
 	if f.fields[f.focus].kind == fieldText {
@@ -254,6 +274,27 @@ func (f formModel) toggle(k string) bool {
 	return false
 }
 
+// choice returns the selected value of a choice field by key, or "" if there's
+// no such field or it has no choices.
+func (f formModel) choice(k string) string {
+	for _, fld := range f.fields {
+		if fld.key == k && fld.kind == fieldChoice && len(fld.choices) > 0 {
+			return fld.choices[fld.sel]
+		}
+	}
+	return ""
+}
+
+// cycleChoice moves the focused choice field's selection by dir, wrapping.
+func (f *formModel) cycleChoice(dir int) {
+	fld := &f.fields[f.focus]
+	if fld.kind != fieldChoice || len(fld.choices) == 0 {
+		return
+	}
+	n := len(fld.choices)
+	fld.sel = (fld.sel + dir + n) % n
+}
+
 func (f formModel) View(width int) string {
 	lines := []string{styles.Title.Render(f.title), ""}
 	if f.note != "" {
@@ -278,6 +319,12 @@ func (f formModel) View(width int) string {
 				box = styles.SuccessText.Render("[x]")
 			}
 			lines = append(lines, marker+box+" "+label)
+		case fieldChoice:
+			val := ""
+			if len(fld.choices) > 0 {
+				val = fld.choices[fld.sel]
+			}
+			lines = append(lines, marker+label, "  "+styles.Subtitle.Render("‹ "+val+" ›"))
 		}
 	}
 

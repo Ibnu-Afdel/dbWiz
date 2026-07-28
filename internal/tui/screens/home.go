@@ -27,6 +27,7 @@ const (
 	choiceContinue homeChoice = iota
 	choiceExisting
 	choiceSaved
+	choiceManual
 	choiceCreate
 	choiceSetup
 	choiceSQLite
@@ -42,6 +43,8 @@ func (c homeChoice) label() string {
 		return "Use an existing database"
 	case choiceSaved:
 		return "Connect to a saved target…"
+	case choiceManual:
+		return "Connect to a database by host/port…"
 	case choiceCreate:
 		return "Create a new database…"
 	case choiceSetup:
@@ -104,6 +107,9 @@ func newHome(containers []docker.Container, cont *continueTarget) Screen {
 	if len(saved) > 0 {
 		choices = append(choices, choiceSaved)
 	}
+	// Manual host/port entry is always available — it's the escape hatch for any
+	// database DBWiz can't discover through Docker (v3 3.1).
+	choices = append(choices, choiceManual)
 	choices = append(choices, choiceCreate, choiceSetup, choiceSQLite)
 	// The doctor row appears only when there's a container to diagnose (v3 1.3).
 	if len(containers) > 0 {
@@ -197,6 +203,8 @@ func (s homeScreen) choose() (Screen, tea.Cmd) {
 		return s, existingRoute(s.containers)
 	case choiceSaved:
 		return s, savedRoute(s.saved)
+	case choiceManual:
+		return s, Push(NewManualConnect())
 	case choiceCreate:
 		return s, createRoute(s.containers)
 	case choiceSetup:
@@ -274,6 +282,8 @@ func (s homeScreen) choiceDetail(c homeChoice) string {
 		return fmt.Sprintf("(%d running)", running)
 	case choiceSaved:
 		return fmt.Sprintf("(%d saved)", len(s.saved))
+	case choiceManual:
+		return "(any reachable Postgres/MySQL — no Docker)"
 	case choiceCreate:
 		return "(create + connect in one flow)"
 	case choiceSetup:

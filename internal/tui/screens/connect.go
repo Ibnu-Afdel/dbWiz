@@ -68,20 +68,30 @@ func newConnect(c docker.Container, create bool) Screen {
 // NewConnectManual starts connecting to a saved manual target (v2 3.3). The
 // engine string is already validated by config, so mapping it is expected to
 // succeed; an unknown engine falls back to Postgres rather than failing to open
-// the screen.
+// the screen. A saved target carries no password, so this always drops to the
+// prompt.
 func NewConnectManual(mt config.ManualTarget) Screen {
 	kind, ok := manualKind(mt.Engine)
 	if !ok {
 		kind = db.KindPostgres
 	}
+	return NewConnectManualEntry(mt.Name, kind, db.Target{Host: mt.Host, Port: mt.Port, User: mt.User, Database: mt.Database})
+}
+
+// NewConnectManualEntry starts connecting to a manual (non-Docker) target the
+// caller has fully specified — the interactive host/port form (v3 3.1) or a saved
+// target (v2 3.3). base may already carry a password (from the form); if it does
+// and the server accepts it, the user never sees the prompt, otherwise the screen
+// drops to the masked prompt as usual.
+func NewConnectManualEntry(name string, kind db.Kind, base db.Target) Screen {
 	s := baseConnect()
 	s.manual = true
-	s.manualName = mt.Name
+	s.manualName = name
 	s.manualKind = kind
-	s.manualBase = db.Target{Host: mt.Host, Port: mt.Port, User: mt.User, Database: mt.Database}
+	s.manualBase = base
 	// A synthetic container so the spinner/prompt text and the dashboard label read
 	// the target's name like any other connection.
-	s.container = manualContainer(mt.Name, kind, mt.Port)
+	s.container = manualContainer(name, kind, base.Port)
 	return s
 }
 
