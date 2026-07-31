@@ -70,3 +70,24 @@ func TestReturnsRows(t *testing.T) {
 		}
 	}
 }
+
+func TestSplitQualified(t *testing.T) {
+	cases := []struct {
+		in     string
+		schema string
+		table  string
+	}{
+		{"users", "", "users"},                        // the pre-v4 form, unchanged
+		{"public.users", "public", "users"},           // schema-qualified
+		{"audit.user.events", "audit", "user.events"}, // only the first dot separates
+		{".users", "", ".users"},                      // leading dot isn't a schema
+		{"public.", "", "public."},                    // trailing dot isn't a table
+		{"", "", ""},
+	}
+	for _, c := range cases {
+		schema, table := splitQualified(c.in)
+		if schema != c.schema || table != c.table {
+			t.Errorf("splitQualified(%q) = (%q, %q), want (%q, %q)", c.in, schema, table, c.schema, c.table)
+		}
+	}
+}

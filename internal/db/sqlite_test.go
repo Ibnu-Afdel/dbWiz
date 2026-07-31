@@ -3,8 +3,10 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -169,4 +171,53 @@ func asDBError(err error, target **DBError) bool {
 func isUnsupported(err error) bool {
 	e, ok := err.(*DBError)
 	return ok && e.Kind == DBErrUnsupported
+}
+
+// TestSQLiteTableDDL exercises the DDLer against a real database file: the
+// statement comes back as it was written, and the table's own index follows it.
+// The implicit index SQLite builds for the PRIMARY KEY has a NULL sql and must
+// not appear — emitting it would make the dump fail to replay.
+func TestSQLiteTableDDL(t *testing.T) {
+	path := newSQLiteFile(t)
+	pool, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := pool.Exec(`CREATE UNIQUE INDEX users_email_idx ON users(email)`); err != nil {
+		t.Fatalf("create index: %v", err)
+	}
+	pool.Close()
+
+	e := openSQLite(t, path)
+	ddl, err := e.TableDDL(context.Background(), "", "users")
+	if err != nil {
+		t.Fatalf("TableDDL: %v", err)
+	}
+	for _, want := range []string{"CREATE TABLE users", "id INTEGER PRIMARY KEY", "name TEXT NOT NULL", "CREATE UNIQUE INDEX users_email_idx"} {
+		if !strings.Contains(ddl, want) {
+			t.Errorf("DDL missing %q:\n%s", want, ddl)
+		}
+	}
+	if strings.Count(ddl, ";") != 2 {
+		t.Errorf("expected exactly two terminated statements:\n%s", ddl)
+	}
+	if strings.HasSuffix(ddl, "\n") {
+		t.Errorf("DDL should not end with a newline: %q", ddl)
+	}
+}
+
+// TestSQLiteTableDDLMissing: an unknown table is a typed "not found", not a
+// silent empty string.
+func TestSQLiteTableDDLMissing(t *testing.T) {
+	e := openSQLite(t, newSQLiteFile(t))
+	_, err := e.TableDDL(context.Background(), "", "nope")
+	if !isDBErrKind(err, DBErrObjectMissing) {
+		t.Fatalf("expected a not-found DBError, got %v", err)
+	}
+}
+
+// isDBErrKind reports whether err is a *DBError of the given kind.
+func isDBErrKind(err error, kind DBErrKind) bool {
+	var de *DBError
+	return errors.As(err, &de) && de.Kind == kind
 }

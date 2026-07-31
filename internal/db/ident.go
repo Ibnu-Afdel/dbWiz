@@ -36,6 +36,21 @@ func validateIdent(name string) error {
 	return nil
 }
 
+// splitQualified splits a "schema.table" reference into its two halves. A name
+// with no dot is returned unqualified (empty schema), which is how every caller
+// before v4 passed table names — so the unqualified path is unchanged. Only the
+// first dot separates: a table whose own name contains a dot would have to be
+// passed unqualified, which is exactly what an unqualified caller does.
+//
+// Each half is still validated and quoted by the caller; splitting here does not
+// relax that.
+func splitQualified(name string) (schema, table string) {
+	if i := strings.Index(name, "."); i > 0 && i < len(name)-1 {
+		return name[:i], name[i+1:]
+	}
+	return "", name
+}
+
 // ValidateIdent is the exported form of validateIdent, letting the tui layer
 // validate a name live as the user types (in the create-database/user forms)
 // with the exact same rules the engines enforce before building SQL. It returns

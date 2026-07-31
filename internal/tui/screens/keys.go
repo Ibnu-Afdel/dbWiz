@@ -85,6 +85,10 @@ type KeyMap struct {
 	// Backup opens the dump/restore screen for the selected database (v3 2.4).
 	Backup key.Binding
 
+	// SchemaDiff compares the selected database's structure with another one on
+	// the same connection (v4 1.5).
+	SchemaDiff key.Binding
+
 	// YankURL copies a ready-to-paste connection URL for the selected database to
 	// the clipboard (v3 1.2). It shares 'y' with CopyCell but fires only on the
 	// databases pane, where no cell is selected, so the two never collide.
@@ -267,6 +271,11 @@ var Keys = KeyMap{
 	Backup: key.NewBinding(
 		key.WithKeys("B"),
 		key.WithHelp("B", "dump/restore"),
+	),
+	// S compares the selected database's structure with another one.
+	SchemaDiff: key.NewBinding(
+		key.WithKeys("S"),
+		key.WithHelp("S", "compare schema"),
 	),
 	// y on the databases pane yanks the connection URL (v3 1.2). Same key as
 	// CopyCell; the dashboard routes it by focus.

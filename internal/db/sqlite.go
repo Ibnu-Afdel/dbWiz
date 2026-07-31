@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Ibnu-Afdel/dbwiz/internal/debuglog"
 )
@@ -29,7 +31,11 @@ type SQLite struct {
 // NewSQLite returns an unconnected SQLite engine.
 func NewSQLite() *SQLite { return &SQLite{} }
 
-var _ Engine = (*SQLite)(nil)
+// compile-time interface checks; SQLite also satisfies DDLer (v4 1.4).
+var (
+	_ Engine = (*SQLite)(nil)
+	_ DDLer  = (*SQLite)(nil)
+)
 
 func (s *SQLite) Kind() Kind { return KindSQLite }
 
@@ -262,4 +268,46 @@ func (s *SQLite) ExecMutation(ctx context.Context, database, sql string) (Result
 		return Result{}, classifySQLite(err)
 	}
 	return res, nil
+}
+
+// TableDDL returns the exact text SQLite stored for the table, followed by the
+// CREATE INDEX for each of its indexes (v4 1.4). sqlite_master keeps the original
+// statement verbatim, so this is the definition as it was written — no
+// reconstruction and no normalisation. Indexes SQLite creates implicitly for
+// UNIQUE/PRIMARY KEY have a NULL sql and are skipped: they come back on their own
+// when the CREATE TABLE is replayed.
+func (s *SQLite) TableDDL(ctx context.Context, database, table string) (string, error) {
+	if err := validateIdent(table); err != nil {
+		return "", err
+	}
+	var stmt sql.NullString
+	const tableQ = `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`
+	if err := s.pool.QueryRowContext(ctx, tableQ, table).Scan(&stmt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", errObjectMissing(fmt.Sprintf("There is no table %q in this database.", table), nil)
+		}
+		return "", classifySQLite(err)
+	}
+
+	parts := []string{strings.TrimSpace(stmt.String) + ";"}
+
+	const idxQ = `SELECT sql FROM sqlite_master
+	              WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL
+	              ORDER BY name`
+	rows, err := s.pool.QueryContext(ctx, idxQ, table)
+	if err != nil {
+		return "", classifySQLite(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var idx string
+		if err := rows.Scan(&idx); err != nil {
+			return "", classifySQLite(err)
+		}
+		parts = append(parts, strings.TrimSpace(idx)+";")
+	}
+	if err := rows.Err(); err != nil {
+		return "", classifySQLite(err)
+	}
+	return strings.Join(parts, "\n"), nil
 }

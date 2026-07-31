@@ -3,10 +3,12 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Ibnu-Afdel/dbwiz/internal/debuglog"
@@ -29,11 +31,13 @@ type Postgres struct {
 // NewPostgres returns an unconnected Postgres engine.
 func NewPostgres() *Postgres { return &Postgres{} }
 
-// compile-time interface checks. Postgres also satisfies Extensioner (v3 1.4);
-// MySQL and SQLite deliberately do not.
+// compile-time interface checks. Postgres also satisfies Extensioner (v3 1.4),
+// which MySQL and SQLite deliberately do not, and DDLer (v4 1.4), which all
+// three do.
 var (
 	_ Engine      = (*Postgres)(nil)
 	_ Extensioner = (*Postgres)(nil)
+	_ DDLer       = (*Postgres)(nil)
 )
 
 func (p *Postgres) Kind() Kind { return KindPostgres }
@@ -190,15 +194,28 @@ func (p *Postgres) ListTables(ctx context.Context, database string) ([]Table, er
 	return out, p.wrap(rows.Err())
 }
 
+// DescribeTable accepts either a bare table name (resolved across the user
+// schemas, as the browser has always passed it) or a schema-qualified
+// "schema.table". Qualifying matters once a caller walks every schema at once —
+// v4's schema capture does — because two schemas may hold a table of the same
+// name, and an unqualified lookup would return both tables' columns run
+// together. An empty schema keeps the original behaviour exactly.
 func (p *Postgres) DescribeTable(ctx context.Context, database, table string) ([]Column, error) {
 	if err := p.ensureDB(ctx, database); err != nil {
 		return nil, err
 	}
+	schema, table := splitQualified(table)
 	if err := validateIdent(table); err != nil {
 		return nil, err
 	}
+	if schema != "" {
+		if err := validateIdent(schema); err != nil {
+			return nil, err
+		}
+	}
 	// information_schema for column type/nullability; a correlated lookup against
-	// pg_constraint marks primary-key columns. Table name is parameterised.
+	// the primary-key constraint marks key columns. Both names are parameterised;
+	// $2 = '' means "any schema".
 	const q = `SELECT c.column_name,
 	                  c.data_type,
 	                  (c.is_nullable = 'YES') AS nullable,
@@ -212,10 +229,12 @@ func (p *Postgres) DescribeTable(ctx context.Context, database, table string) ([
 	                AND kcu.table_schema = tc.table_schema
 	               WHERE tc.constraint_type = 'PRIMARY KEY'
 	                 AND tc.table_name = $1
+	                 AND ($2 = '' OR tc.table_schema = $2)
 	           ) pk ON pk.column_name = c.column_name
 	           WHERE c.table_name = $1
+	             AND ($2 = '' OR c.table_schema = $2)
 	           ORDER BY c.ordinal_position`
-	rows, err := p.pool.QueryContext(ctx, q, table)
+	rows, err := p.pool.QueryContext(ctx, q, table, schema)
 	if err != nil {
 		return nil, classifyPostgres(err)
 	}
@@ -530,4 +549,175 @@ func (p *Postgres) CreateExtension(ctx context.Context, database, name string) e
 		return classifyPostgres(err)
 	}
 	return nil
+}
+
+// TableDDL rebuilds the CREATE TABLE statement for a table, plus a CREATE INDEX
+// for each index that isn't already implied by a constraint (v4 1.4).
+//
+// Postgres has no SHOW CREATE TABLE, so unlike MySQL and SQLite this is
+// reconstructed from the catalog. The table is resolved with to_regclass, which
+// both accepts a schema-qualified name and — for a bare name — resolves it
+// through the session's search_path exactly as a query would; every follow-up
+// lookup then keys off the resulting OID, so a table name that exists in two
+// schemas can never mix their definitions together.
+func (p *Postgres) TableDDL(ctx context.Context, database, table string) (string, error) {
+	if err := p.ensureDB(ctx, database); err != nil {
+		return "", err
+	}
+	schema, name := splitQualified(table)
+	if err := validateIdent(name); err != nil {
+		return "", err
+	}
+	ref := quotePGIdent(name)
+	if schema != "" {
+		if err := validateIdent(schema); err != nil {
+			return "", err
+		}
+		ref = quotePGIdent(schema) + "." + quotePGIdent(name)
+	}
+
+	var (
+		oid     uint32
+		nsp     string
+		relname string
+	)
+	const findQ = `SELECT c.oid, n.nspname, c.relname
+	               FROM pg_catalog.pg_class c
+	               JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+	               WHERE c.oid = to_regclass($1) AND c.relkind IN ('r','p')`
+	switch err := p.pool.QueryRowContext(ctx, findQ, ref).Scan(&oid, &nsp, &relname); {
+	case errors.Is(err, sql.ErrNoRows):
+		return "", errObjectMissing(fmt.Sprintf("There is no table %s in %s.", table, database), nil)
+	case err != nil:
+		return "", classifyPostgres(err)
+	}
+
+	cols, err := p.ddlColumns(ctx, oid)
+	if err != nil {
+		return "", err
+	}
+	constraints, err := p.ddlConstraints(ctx, oid)
+	if err != nil {
+		return "", err
+	}
+	indexes, err := p.ddlIndexes(ctx, oid)
+	if err != nil {
+		return "", err
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "CREATE TABLE %s.%s (\n", quotePGIdent(nsp), quotePGIdent(relname))
+	body := append(cols, constraints...)
+	for i, line := range body {
+		sep := ","
+		if i == len(body)-1 {
+			sep = ""
+		}
+		fmt.Fprintf(&b, "    %s%s\n", line, sep)
+	}
+	b.WriteString(");")
+	for _, idx := range indexes {
+		fmt.Fprintf(&b, "\n%s;", idx)
+	}
+	return b.String(), nil
+}
+
+// ddlColumns renders one column definition per line, in ordinal order. An
+// identity column is spelled as GENERATED … AS IDENTITY rather than as its
+// underlying sequence default, because that is how it must be recreated.
+func (p *Postgres) ddlColumns(ctx context.Context, oid uint32) ([]string, error) {
+	const q = `SELECT a.attname,
+	                  pg_catalog.format_type(a.atttypid, a.atttypmod),
+	                  a.attnotnull,
+	                  COALESCE(pg_catalog.pg_get_expr(d.adbin, d.adrelid), ''),
+	                  a.attidentity
+	           FROM pg_catalog.pg_attribute a
+	           LEFT JOIN pg_catalog.pg_attrdef d
+	             ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+	           WHERE a.attrelid = $1 AND a.attnum > 0 AND NOT a.attisdropped
+	           ORDER BY a.attnum`
+	rows, err := p.pool.QueryContext(ctx, q, oid)
+	if err != nil {
+		return nil, classifyPostgres(err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var name, typ, def, identity string
+		var notNull bool
+		if err := rows.Scan(&name, &typ, &notNull, &def, &identity); err != nil {
+			return nil, classifyPostgres(err)
+		}
+		line := quotePGIdent(name) + " " + typ
+		switch identity {
+		case "a":
+			line += " GENERATED ALWAYS AS IDENTITY"
+		case "d":
+			line += " GENERATED BY DEFAULT AS IDENTITY"
+		default:
+			if def != "" {
+				line += " DEFAULT " + def
+			}
+		}
+		if notNull {
+			line += " NOT NULL"
+		}
+		out = append(out, line)
+	}
+	return out, p.wrap(rows.Err())
+}
+
+// ddlConstraints renders the table's constraints via pg_get_constraintdef, which
+// is the server's own rendering — primary key first, then unique, foreign key,
+// and check, so the output is stable between runs.
+func (p *Postgres) ddlConstraints(ctx context.Context, oid uint32) ([]string, error) {
+	const q = `SELECT conname, pg_catalog.pg_get_constraintdef(oid)
+	           FROM pg_catalog.pg_constraint
+	           WHERE conrelid = $1 AND contype IN ('p','u','f','c')
+	           ORDER BY CASE contype WHEN 'p' THEN 0 WHEN 'u' THEN 1 WHEN 'f' THEN 2 ELSE 3 END,
+	                    conname`
+	rows, err := p.pool.QueryContext(ctx, q, oid)
+	if err != nil {
+		return nil, classifyPostgres(err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var name, def string
+		if err := rows.Scan(&name, &def); err != nil {
+			return nil, classifyPostgres(err)
+		}
+		out = append(out, "CONSTRAINT "+quotePGIdent(name)+" "+def)
+	}
+	return out, p.wrap(rows.Err())
+}
+
+// ddlIndexes returns the CREATE INDEX statements for indexes that a constraint
+// doesn't already create — emitting those too would make the DDL fail to replay.
+func (p *Postgres) ddlIndexes(ctx context.Context, oid uint32) ([]string, error) {
+	const q = `SELECT pg_catalog.pg_get_indexdef(i.indexrelid)
+	           FROM pg_catalog.pg_index i
+	           WHERE i.indrelid = $1
+	             AND NOT EXISTS (
+	                 SELECT 1 FROM pg_catalog.pg_constraint c
+	                 WHERE c.conindid = i.indexrelid
+	             )
+	           ORDER BY 1`
+	rows, err := p.pool.QueryContext(ctx, q, oid)
+	if err != nil {
+		return nil, classifyPostgres(err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var def string
+		if err := rows.Scan(&def); err != nil {
+			return nil, classifyPostgres(err)
+		}
+		out = append(out, def)
+	}
+	return out, p.wrap(rows.Err())
 }

@@ -3,9 +3,11 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 
 	"github.com/go-sql-driver/mysql"
 
@@ -30,7 +32,11 @@ func NewMySQL() *MySQL { return &MySQL{kind: KindMySQL} }
 // every code path with NewMySQL; only the label differs.
 func NewMariaDB() *MySQL { return &MySQL{kind: KindMariaDB} }
 
-var _ Engine = (*MySQL)(nil)
+// compile-time interface checks; MySQL also satisfies DDLer (v4 1.4).
+var (
+	_ Engine = (*MySQL)(nil)
+	_ DDLer  = (*MySQL)(nil)
+)
 
 func (m *MySQL) Kind() Kind { return m.kind }
 
@@ -403,4 +409,35 @@ func (m *MySQL) ExecMutation(ctx context.Context, database, sql string) (Result,
 		return Result{}, classifyMySQL(err)
 	}
 	return res, nil
+}
+
+// TableDDL returns the server's own SHOW CREATE TABLE output (v4 1.4). MySQL
+// renders the complete definition — columns, defaults, keys, engine and charset
+// — so there is nothing to reconstruct; only the terminating semicolon SHOW
+// leaves off is added.
+func (m *MySQL) TableDDL(ctx context.Context, database, table string) (string, error) {
+	schema := m.schemaOf(database)
+	if err := validateIdent(table); err != nil {
+		return "", err
+	}
+	if schema != "" {
+		if err := validateIdent(schema); err != nil {
+			return "", err
+		}
+	}
+	ref := quoteMySQLIdent(table)
+	if schema != "" {
+		ref = quoteMySQLIdent(schema) + "." + quoteMySQLIdent(table)
+	}
+
+	// SHOW CREATE TABLE takes no parameters; the identifiers are validated and
+	// quoted, the same contract every other statement in this package follows.
+	var name, ddl string
+	if err := m.pool.QueryRowContext(ctx, "SHOW CREATE TABLE "+ref).Scan(&name, &ddl); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", errObjectMissing(fmt.Sprintf("There is no table %s in %s.", table, schema), nil)
+		}
+		return "", classifyMySQL(err)
+	}
+	return strings.TrimSpace(ddl) + ";", nil
 }
