@@ -18,6 +18,11 @@ import (
 // Production never reassigns it.
 var detect = docker.Detect
 
+// detectRemote is the remote docker scan (over SSH) that `dbwiz list --ssh`
+// runs, kept as a package var for the same reason as detect. Production never
+// reassigns it.
+var detectRemote = docker.DetectRemote
+
 // NewUseCommand builds `dbwiz use <container>`: it pins a database container as
 // the context DBWiz opens next, so a subsequent `dbwiz` launch offers to
 // continue straight there. It's the non-interactive counterpart to picking a

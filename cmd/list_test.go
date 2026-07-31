@@ -19,7 +19,7 @@ func TestListTable(t *testing.T) {
 	}, nil)
 
 	var out bytes.Buffer
-	if err := runList(context.Background(), &out, false); err != nil {
+	if err := runList(context.Background(), &out, false, ""); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	got := out.String()
@@ -46,7 +46,7 @@ func TestListJSON(t *testing.T) {
 	}, nil)
 
 	var out bytes.Buffer
-	if err := runList(context.Background(), &out, true); err != nil {
+	if err := runList(context.Background(), &out, true, ""); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	if strings.Contains(out.String(), "s3cret") || strings.Contains(strings.ToLower(out.String()), "password") {
@@ -69,7 +69,7 @@ func TestListEmpty(t *testing.T) {
 	fakeDetect(t, nil, nil)
 
 	var table bytes.Buffer
-	if err := runList(context.Background(), &table, false); err != nil {
+	if err := runList(context.Background(), &table, false, ""); err != nil {
 		t.Fatalf("runList table: %v", err)
 	}
 	if !strings.Contains(table.String(), "No database containers") {
@@ -77,10 +77,48 @@ func TestListEmpty(t *testing.T) {
 	}
 
 	var js bytes.Buffer
-	if err := runList(context.Background(), &js, true); err != nil {
+	if err := runList(context.Background(), &js, true, ""); err != nil {
 		t.Fatalf("runList json: %v", err)
 	}
 	if strings.TrimSpace(js.String()) != "[]" {
 		t.Errorf("expected an empty JSON array, got %q", js.String())
+	}
+}
+
+// TestListRemote scans a remote Docker daemon over SSH with --ssh: the SSH
+// target is parsed into a ssh:// DOCKER_HOST and the returned containers render
+// like any local scan.
+func TestListRemote(t *testing.T) {
+	gotHost := fakeDetectRemote(t, []docker.Container{
+		{Name: "pg-prod", Engine: docker.EnginePostgres, State: docker.StateRunning, HostPort: 5432, Image: "postgres:18"},
+	}, nil)
+	// The local scan must not run when --ssh is set.
+	fakeDetect(t, []docker.Container{{Name: "should-not-appear"}}, nil)
+
+	var out bytes.Buffer
+	if err := runList(context.Background(), &out, false, "deploy@db.example.com"); err != nil {
+		t.Fatalf("runList: %v", err)
+	}
+	if *gotHost != "ssh://deploy@db.example.com:22" {
+		t.Errorf("DOCKER_HOST = %q, want ssh://deploy@db.example.com:22", *gotHost)
+	}
+	got := out.String()
+	if !strings.Contains(got, "pg-prod") || strings.Contains(got, "should-not-appear") {
+		t.Errorf("expected the remote scan's containers, got:\n%s", got)
+	}
+}
+
+// TestListRemoteBadTarget rejects a malformed --ssh value before dialing, so a
+// typo is a clear error rather than a hung connection.
+func TestListRemoteBadTarget(t *testing.T) {
+	called := fakeDetectRemote(t, nil, nil)
+
+	var out bytes.Buffer
+	err := runList(context.Background(), &out, false, "   ")
+	if err == nil {
+		t.Fatal("expected an error for an empty SSH target")
+	}
+	if *called != "" {
+		t.Errorf("remote scan should not run on a bad target, got host %q", *called)
 	}
 }

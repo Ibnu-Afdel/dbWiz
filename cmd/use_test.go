@@ -18,6 +18,21 @@ func fakeDetect(t *testing.T, containers []docker.Container, err error) {
 	t.Cleanup(func() { detect = old })
 }
 
+// fakeDetectRemote swaps the remote (over-SSH) docker scan for one test and
+// records the DOCKER_HOST it was called with, so a test can assert the SSH
+// target was parsed into a ssh:// URL correctly.
+func fakeDetectRemote(t *testing.T, containers []docker.Container, err error) *string {
+	t.Helper()
+	var gotHost string
+	old := detectRemote
+	detectRemote = func(_ context.Context, dockerHost string) ([]docker.Container, error) {
+		gotHost = dockerHost
+		return containers, err
+	}
+	t.Cleanup(func() { detectRemote = old })
+	return &gotHost
+}
+
 // TestUseSetsContext verifies a known container name is recorded as the last-used
 // target and confirmed on stdout.
 func TestUseSetsContext(t *testing.T) {
