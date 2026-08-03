@@ -151,6 +151,25 @@ func (q quoter) table(database, table string) string {
 	return q.ident(table)
 }
 
+// QuoteIdent quotes an identifier for the engine. It is the exported form of the
+// quoting the builders above already do, for a caller that composes a read they
+// don't cover — the migration-ledger reader's ORDER BY (v4 3.1). Quoting stays
+// here so a hand-composed statement is quoted exactly like a generated one.
+func QuoteIdent(kind Kind, name string) string { return quoterFor(kind).ident(name) }
+
+// TableRef renders a qualified table reference for the engine. It extends
+// quoter.table with the one case the mutation builders never needed: a Postgres
+// table outside the connection's search_path, which has to name its schema in the
+// FROM clause or the read simply fails. MySQL keeps qualifying by database (its
+// schema and database are one namespace) and SQLite qualifies by neither.
+func TableRef(kind Kind, database, schema, table string) string {
+	q := quoterFor(kind)
+	if kind == KindPostgres && schema != "" {
+		return q.ident(schema) + "." + q.ident(table)
+	}
+	return q.table(database, table)
+}
+
 // buildWhere renders an AND of equality (or IS NULL) predicates pinning a row by
 // its key columns. A nil value becomes IS NULL because "= NULL" never matches.
 func buildWhere(q quoter, cols []string, vals []any) (string, error) {

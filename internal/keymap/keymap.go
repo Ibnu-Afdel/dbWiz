@@ -105,6 +105,10 @@ type KeyMap struct {
 	// Plan shows how the engine would run the editor's statement (v4 2.4).
 	Plan key.Binding
 
+	// Migrations reports what the current database's migration ledger says —
+	// which tool manages it, and how far it has got (v4 3.4).
+	Migrations key.Binding
+
 	// YankURL copies a ready-to-paste connection URL for the selected database to
 	// the clipboard (v3 1.2). It shares 'y' with CopyCell but fires only on the
 	// databases pane, where no cell is selected, so the two never collide.
@@ -305,6 +309,12 @@ var Keys = KeyMap{
 	Plan: key.NewBinding(
 		key.WithKeys("alt+p"),
 		key.WithHelp("⌥p", "query plan"),
+	),
+	// M reports the current database's migration state. A capital letter like its
+	// neighbours B and S, which are the other whole-database actions.
+	Migrations: key.NewBinding(
+		key.WithKeys("M"),
+		key.WithHelp("M", "migrations"),
 	),
 	// y on the databases pane yanks the connection URL (v3 1.2). Same key as
 	// CopyCell; the dashboard routes it by focus.

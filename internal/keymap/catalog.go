@@ -111,6 +111,7 @@ func Groups() []Group {
 				{Keys.YankURL, "On the databases pane: copy a ready-to-paste connection URL — same key as copy-cell, and the focused pane decides which one happens."},
 				{Keys.Backup, "Dump the selected database to a file, or restore one into it."},
 				{Keys.SchemaDiff, "Compare this database's structure with another on the same server."},
+				{Keys.Migrations, "Show what this database's migration ledger says: which tool manages it, and how far it has got."},
 			},
 		},
 	}

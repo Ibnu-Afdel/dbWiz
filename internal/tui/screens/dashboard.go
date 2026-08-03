@@ -52,6 +52,7 @@ const (
 	modeBackup                      // the dump/restore screen (v3 2.4)
 	modeSchemaDiff                  // the compare-two-databases overlay (v4 1.5)
 	modePlan                        // the query-plan viewer over the editor's statement (v4 2.4)
+	modeMigrations                  // the migration-ledger report for the current database (v4 3.4)
 )
 
 // formPurpose records which create command a submitted form should run.
@@ -211,6 +212,10 @@ type dashboardScreen struct {
 	// capture so a superseded report is dropped (v4 2.4).
 	plan    planState
 	planSeq int
+	// migrations backs the migration-ledger report for the current database, with
+	// its own monotonic seq for the same reason (v4 3.4).
+	migrations    migrationsState
+	migrationsSeq int
 
 	// columnCache maps a table name to its column names, warmed as the user
 	// previews or describes tables. It's the "cached metadata" the editor's
@@ -448,6 +453,9 @@ func (s dashboardScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	case planDoneMsg:
 		return s.applyPlanDone(msg)
 
+	case migrationsDoneMsg:
+		return s.applyMigrationsDone(msg)
+
 	case grantsLoadedMsg:
 		// Only apply if the matrix is still open on the same user+database.
 		if s.mode == modeGrant && msg.user == s.grant.subject && msg.database == s.grant.database {
@@ -561,6 +569,8 @@ func (s dashboardScreen) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s.startSchemaDiff()
 	case key.Matches(msg, Keys.Plan):
 		return s.startPlan(false)
+	case key.Matches(msg, Keys.Migrations):
+		return s.startMigrations()
 	case key.Matches(msg, Keys.Focus):
 		s.focus = s.nextFocus()
 		return s, s.syncEditorFocus()
@@ -790,6 +800,14 @@ func (s dashboardScreen) Help() []key.Binding {
 			b = append(b, key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "run and measure")))
 		}
 		return append(b, Keys.Back)
+	case modeMigrations:
+		if s.migrations.phase != migrationsReport {
+			return []key.Binding{Keys.Quit}
+		}
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "scroll")),
+			Keys.Back,
+		}
 	case modeSchemaDiff:
 		if s.schemaDiff.phase == schemaDiffReport {
 			return []key.Binding{
@@ -822,9 +840,9 @@ func (s dashboardScreen) Help() []key.Binding {
 	b := []key.Binding{Keys.Focus, Keys.Up, Keys.Down}
 	switch s.focus {
 	case focusDatabases:
-		b = append(b, Keys.Select, Keys.Create, Keys.Delete, Keys.Backup, Keys.SchemaDiff, Keys.YankURL)
+		b = append(b, Keys.Select, Keys.Create, Keys.Delete, Keys.Backup, Keys.SchemaDiff, Keys.Migrations, Keys.YankURL)
 	case focusTables:
-		b = append(b, Keys.Select, Keys.Info, Keys.InsertRow, Keys.Filter, Keys.RowCount, Keys.Truncate)
+		b = append(b, Keys.Select, Keys.Info, Keys.InsertRow, Keys.Filter, Keys.RowCount, Keys.Truncate, Keys.Migrations)
 	case focusUsers:
 		b = append(b, Keys.Create, Keys.Delete, Keys.Grant, Keys.EditUser)
 	case focusResults:

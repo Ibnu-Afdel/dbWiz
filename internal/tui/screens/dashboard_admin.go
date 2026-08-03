@@ -198,6 +198,8 @@ func (s dashboardScreen) handleOverlayKey(msg tea.KeyPressMsg) (dashboardScreen,
 		return s.updateBackup(msg)
 	case modePlan:
 		return s.updatePlan(msg)
+	case modeMigrations:
+		return s.updateMigrations(msg)
 	case modeSchemaDiff:
 		return s.updateSchemaDiff(msg)
 	case modeSaved:

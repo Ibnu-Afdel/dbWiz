@@ -38,6 +38,10 @@ type fakeEngine struct {
 	lastMutationDB   string
 	mutationErr      error
 	mutationAffected int64
+	// mutationFn, when set, answers ExecMutation instead of the canned reply. The
+	// migration-ledger read (v4 3.4) composes two different statements against the
+	// same table and needs a different answer for each.
+	mutationFn func(sql string) (db.Result, error)
 
 	closed          bool
 	lastListTables  string
@@ -185,6 +189,9 @@ func (f *fakeEngine) ExecMutation(_ context.Context, database, sql string) (db.R
 	f.lastMutationDB, f.lastMutationSQL = database, sql
 	if f.mutationErr != nil {
 		return db.Result{}, f.mutationErr
+	}
+	if f.mutationFn != nil {
+		return f.mutationFn(sql)
 	}
 	return db.Result{RowsAffected: f.mutationAffected}, nil
 }

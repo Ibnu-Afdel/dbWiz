@@ -58,6 +58,7 @@ func main() {
 		cmd.NewHealthCommand(),
 		cmd.NewExtCommand(),
 		cmd.NewSchemaCommand(),
+		cmd.NewMigrationsCommand(),
 	)
 	// "dbwiz v1.0.0" rather than cobra's default "dbwiz version v1.0.0".
 	rootCmd.SetVersionTemplate("dbwiz {{.Version}}\n")
