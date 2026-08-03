@@ -44,6 +44,7 @@ func main() {
 	// Scripting subcommands (v2 on) live in package cmd; the bare `dbwiz` still
 	// launches the TUI via rootCmd's RunE.
 	rootCmd.AddCommand(
+		cmd.NewKeysCommand(),
 		cmd.NewUseCommand(),
 		cmd.NewListCommand(),
 		cmd.NewSetupCommand(),

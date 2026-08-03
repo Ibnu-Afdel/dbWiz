@@ -52,6 +52,12 @@ type model struct {
 	active int
 	help   help.Model
 
+	// showKeys is the F1 catalogue of every binding; keysOffset scrolls it. It
+	// lives on the root rather than on a screen because it is global — it has to
+	// open over whatever is showing, including a screen's own overlay.
+	showKeys   bool
+	keysOffset int
+
 	width, height int
 }
 
@@ -120,9 +126,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // quit, the help toggle, and tab management. The bool reports whether the key
 // was consumed; when false the caller delegates it to the active screen.
 func (m model) handleGlobalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
-	switch {
-	case key.Matches(msg, screens.Keys.Quit):
+	if key.Matches(msg, screens.Keys.Quit) {
 		return m, tea.Quit, true
+	}
+	// The catalogue is modal: while it's open it owns every key but quit, so a
+	// stray press can't act on the screen hidden behind it.
+	if m.showKeys {
+		return m.handleKeysOverlay(msg)
+	}
+	switch {
+	case key.Matches(msg, screens.Keys.KeyList):
+		m.showKeys, m.keysOffset = true, 0
+		return m, nil, true
 	case key.Matches(msg, screens.Keys.Help):
 		m.help.ShowAll = !m.help.ShowAll
 		return m, nil, true
@@ -219,20 +234,24 @@ func (m model) resize() tea.Cmd {
 // View renders the tab bar (only when more than one tab is open), the active
 // screen, and the help bar pinned at the bottom.
 func (m model) View() tea.View {
-	helpBar := m.help.View(keymap{bindings: m.helpBindings()})
+	helpBar := m.help.View(flatKeys{bindings: m.helpBindings()})
 
 	var header string
-	reserved := 1 // help bar row
+	// The help bar is one row normally, but "?" expands it into a stacked list of
+	// every binding this screen offers. Reserving a hard-coded 1 there pushed the
+	// bar off the bottom of the window and the list came out truncated, so measure
+	// what it actually renders.
+	reserved := lipgloss.Height(helpBar)
 	if len(m.tabs) > 1 {
 		header = m.tabBar() + "\n"
 		reserved += 2 // tab bar row + its trailing newline occupy one visible row
 	}
 
-	bodyHeight := m.height - reserved
-	if bodyHeight < 1 {
-		bodyHeight = m.height
-	}
+	bodyHeight := max(m.height-reserved, 1)
 	body := m.top().View(m.width, bodyHeight)
+	if m.showKeys {
+		body = m.keysView(m.width, bodyHeight)
+	}
 
 	v := tea.NewView(header + body + "\n" + styles.Hint.Render(helpBar))
 	v.AltScreen = true // full-window program; restores the terminal on exit
@@ -244,11 +263,18 @@ func (m model) View() tea.View {
 // single-target experience stays uncluttered; "new tab" is always offered.
 func (m model) helpBindings() []key.Binding {
 	b := append([]key.Binding{}, m.top().Help()...)
+	if m.showKeys {
+		// The catalogue owns the screen; advertise only the way out of it.
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "scroll")),
+			screens.Keys.Back, screens.Keys.Quit,
+		}
+	}
 	b = append(b, screens.Keys.NewTab)
 	if len(m.tabs) > 1 {
 		b = append(b, screens.Keys.SwitchTab, screens.Keys.CloseTab)
 	}
-	return append(b, screens.Keys.Help, screens.Keys.Quit)
+	return append(b, screens.Keys.Help, screens.Keys.KeyList, screens.Keys.Quit)
 }
 
 // tabBar renders the row of open tabs, the active one highlighted, each prefixed
@@ -266,12 +292,35 @@ func (m model) tabBar() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, cells...)
 }
 
-// keymap adapts a flat binding slice to the help.KeyMap interface so the root
-// can render whatever set the active screen exposes.
-type keymap struct{ bindings []key.Binding }
+// flatKeys adapts a flat binding slice to the help.KeyMap interface so the root
+// can render whatever set the active screen exposes. (It is not the app's
+// keymap — that lives in internal/keymap.)
+type flatKeys struct{ bindings []key.Binding }
 
-func (k keymap) ShortHelp() []key.Binding  { return k.bindings }
-func (k keymap) FullHelp() [][]key.Binding { return [][]key.Binding{k.bindings} }
+func (k flatKeys) ShortHelp() []key.Binding  { return k.bindings }
+func (k flatKeys) FullHelp() [][]key.Binding { return [][]key.Binding{k.bindings} }
+
+// handleKeysOverlay drives the F1 catalogue while it is open. Everything it
+// doesn't use is swallowed rather than passed through, which is what makes it
+// modal.
+func (m model) handleKeysOverlay(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
+	page := max(m.height-keysChrome, 4)
+	switch msg.String() {
+	case "esc", "q", "f1":
+		m.showKeys = false
+	case "up", "k":
+		m.keysOffset = max(0, m.keysOffset-1)
+	case "down", "j":
+		m.keysOffset++
+	case "pgup":
+		m.keysOffset = max(0, m.keysOffset-page)
+	case "pgdown":
+		m.keysOffset += page
+	case "home":
+		m.keysOffset = 0
+	}
+	return m, nil, true
+}
 
 // tabDigit reports whether msg is a bare digit 1–9 (no modifiers) and returns
 // its value, so the root can jump straight to a tab by number. It ignores any
