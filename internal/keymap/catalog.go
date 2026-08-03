@@ -93,6 +93,7 @@ func Groups() []Group {
 				{Keys.Edit, "Jump into the SQL editor from anywhere on the dashboard."},
 				{Keys.Run, "Run the statement in the editor."},
 				{Keys.Cancel, "While a statement runs: cancel it, server-side."},
+				{Keys.Plan, "Show how the engine would run this statement, and what's expensive about it."},
 				{Keys.Complete, "Complete a table or column name from what browsing already loaded."},
 				{Keys.History, "Step back and forward through statements you've run."},
 				{Keys.HistoryList, "Search your history for this target."},

@@ -51,6 +51,7 @@ func main() {
 		cmd.NewCreateCommand(),
 		cmd.NewDropCommand(),
 		cmd.NewQueryCommand(),
+		cmd.NewExplainCommand(),
 		cmd.NewDumpCommand(),
 		cmd.NewRestoreCommand(),
 		cmd.NewURLCommand(),

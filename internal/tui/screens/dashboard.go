@@ -51,6 +51,7 @@ const (
 	modeFilter                      // the quick WHERE-filter input over a preview (v3 2.3)
 	modeBackup                      // the dump/restore screen (v3 2.4)
 	modeSchemaDiff                  // the compare-two-databases overlay (v4 1.5)
+	modePlan                        // the query-plan viewer over the editor's statement (v4 2.4)
 )
 
 // formPurpose records which create command a submitted form should run.
@@ -206,6 +207,10 @@ type dashboardScreen struct {
 	backup backupState
 	// schemaDiff backs the compare-two-databases overlay (v4 1.5).
 	schemaDiff schemaDiffState
+	// plan backs the query-plan viewer, with the monotonic planSeq tagging each
+	// capture so a superseded report is dropped (v4 2.4).
+	plan    planState
+	planSeq int
 
 	// columnCache maps a table name to its column names, warmed as the user
 	// previews or describes tables. It's the "cached metadata" the editor's
@@ -440,6 +445,9 @@ func (s dashboardScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	case schemaDiffDoneMsg:
 		return s.applySchemaDiffDone(msg)
 
+	case planDoneMsg:
+		return s.applyPlanDone(msg)
+
 	case grantsLoadedMsg:
 		// Only apply if the matrix is still open on the same user+database.
 		if s.mode == modeGrant && msg.user == s.grant.subject && msg.database == s.grant.database {
@@ -551,6 +559,8 @@ func (s dashboardScreen) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s.startBackup()
 	case key.Matches(msg, Keys.SchemaDiff):
 		return s.startSchemaDiff()
+	case key.Matches(msg, Keys.Plan):
+		return s.startPlan(false)
 	case key.Matches(msg, Keys.Focus):
 		s.focus = s.nextFocus()
 		return s, s.syncEditorFocus()
@@ -771,6 +781,15 @@ func (s dashboardScreen) Help() []key.Binding {
 			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "next")),
 			Keys.Back,
 		}
+	case modePlan:
+		if s.plan.phase != planReport {
+			return []key.Binding{Keys.Quit}
+		}
+		b := []key.Binding{key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "scroll"))}
+		if !s.plan.analyzed {
+			b = append(b, key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "run and measure")))
+		}
+		return append(b, Keys.Back)
 	case modeSchemaDiff:
 		if s.schemaDiff.phase == schemaDiffReport {
 			return []key.Binding{
@@ -798,7 +817,7 @@ func (s dashboardScreen) Help() []key.Binding {
 	}
 	// The editor advertises its own run/history/saved/complete keys.
 	if s.focus == focusEditor {
-		return []key.Binding{Keys.Run, Keys.Complete, Keys.History, Keys.HistoryList, Keys.SaveQuery, Keys.SavedList, Keys.Focus, Keys.Back}
+		return []key.Binding{Keys.Run, Keys.Plan, Keys.Complete, Keys.History, Keys.HistoryList, Keys.SaveQuery, Keys.SavedList, Keys.Focus, Keys.Back}
 	}
 	b := []key.Binding{Keys.Focus, Keys.Up, Keys.Down}
 	switch s.focus {

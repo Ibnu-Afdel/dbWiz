@@ -195,6 +195,8 @@ func (s dashboardScreen) renderOverlay(width, height int) string {
 		body = s.filterView(width)
 	case modeBackup:
 		body = s.backupView(width)
+	case modePlan:
+		body = s.planView(width)
 	case modeSchemaDiff:
 		body = s.schemaDiffView(width)
 	}

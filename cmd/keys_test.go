@@ -30,7 +30,7 @@ func TestKeysCommandPrintsTheCatalogue(t *testing.T) {
 	}
 	// A couple of specific keys, so a catalogue that silently emptied itself would
 	// still be caught here.
-	for _, want := range []string{"ctrl+c", "F1", "⌥h", "Compare this database's structure"} {
+	for _, want := range []string{"ctrl+c", "F1", "⌥p", "Compare this database's structure"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q:\n%s", want, got)
 		}

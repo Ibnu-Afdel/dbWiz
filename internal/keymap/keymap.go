@@ -102,6 +102,9 @@ type KeyMap struct {
 	// the same connection (v4 1.5).
 	SchemaDiff key.Binding
 
+	// Plan shows how the engine would run the editor's statement (v4 2.4).
+	Plan key.Binding
+
 	// YankURL copies a ready-to-paste connection URL for the selected database to
 	// the clipboard (v3 1.2). It shares 'y' with CopyCell but fires only on the
 	// databases pane, where no cell is selected, so the two never collide.
@@ -296,6 +299,12 @@ var Keys = KeyMap{
 	SchemaDiff: key.NewBinding(
 		key.WithKeys("S"),
 		key.WithHelp("S", "compare schema"),
+	),
+	// alt+p explains the editor's statement. A modifier combo like its neighbours
+	// alt+h/alt+w/alt+e, so it works while the statement is being typed.
+	Plan: key.NewBinding(
+		key.WithKeys("alt+p"),
+		key.WithHelp("⌥p", "query plan"),
 	),
 	// y on the databases pane yanks the connection URL (v3 1.2). Same key as
 	// CopyCell; the dashboard routes it by focus.

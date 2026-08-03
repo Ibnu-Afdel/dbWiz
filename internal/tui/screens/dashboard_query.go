@@ -99,6 +99,9 @@ func (s dashboardScreen) handleEditorKey(msg tea.KeyPressMsg) (dashboardScreen, 
 	case key.Matches(msg, Keys.Complete):
 		// Schema-aware autocomplete for the word under the cursor (v2 2.5).
 		return s.openComplete()
+	case key.Matches(msg, Keys.Plan):
+		// Explain the statement being written, without leaving the editor (v4 2.4).
+		return s.startPlan(false)
 	}
 	// The modal editor owns esc (insert→normal, normal→leave), the history cycle,
 	// motions, and typing (v2 2.4).
