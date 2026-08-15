@@ -202,6 +202,10 @@ func (s dashboardScreen) handleOverlayKey(msg tea.KeyPressMsg) (dashboardScreen,
 		return s.updateMigrations(msg)
 	case modeSchemaDiff:
 		return s.updateSchemaDiff(msg)
+	case modeFind:
+		return s.updateFind(msg)
+	case modeRowDetail:
+		return s.updateRowDetail(msg)
 	case modeSaved:
 		var res savedResult
 		var cmd tea.Cmd

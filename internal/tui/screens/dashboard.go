@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
@@ -53,6 +54,8 @@ const (
 	modeSchemaDiff                  // the compare-two-databases overlay (v4 1.5)
 	modePlan                        // the query-plan viewer over the editor's statement (v4 2.4)
 	modeMigrations                  // the migration-ledger report for the current database (v4 3.4)
+	modeFind                        // the type-to-filter jump list over a navigator pane (v5 1.1)
+	modeRowDetail                   // every column of the selected results row, full-value (v5 1.2)
 )
 
 // formPurpose records which create command a submitted form should run.
@@ -156,6 +159,18 @@ type dashboardScreen struct {
 	cellCol     int
 	cellVP      viewport.Model
 	cellColName string
+
+	// Row-detail overlay (v5 1.2): every column of cellRow, full value, as a
+	// scrollable key/value list — rowVP is the viewport, rowDetailTitle names the
+	// table and the row's position within the current result set.
+	rowVP          viewport.Model
+	rowDetailTitle string
+
+	// Find overlay (v5 1.1): a type-to-filter jump list over whichever navigator
+	// pane was focused when it opened (findTarget), so picking an item can be
+	// routed back to that pane's own cursor and select behaviour.
+	findList   findModel
+	findTarget focusTarget
 
 	// Query editor (Phase 7). editor is the multi-line SQL input; a submitted
 	// statement runs async under queryCancel with the monotonic querySeq so a
@@ -305,6 +320,9 @@ func (s dashboardScreen) CapturesText() bool {
 	if s.mode == modeComplete {
 		return s.completeList.settingFilter()
 	}
+	if s.mode == modeFind {
+		return s.findList.settingFilter()
+	}
 	return s.mode == modeBrowse && s.focus == focusEditor
 }
 
@@ -368,7 +386,10 @@ func (s dashboardScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		s.tblLoading, s.tblErr = false, nil
 		s.tables = msg.tables
 		s.tblCursor = clampCursor(s.tblCursor, len(s.tables))
-		return s, nil
+		// Warm the autocomplete column cache for the whole database in the
+		// background (v5 3.1) — cacheColumns keeps firing from browsing too,
+		// this just means a table you haven't opened yet still completes.
+		return s, prefetchColumnsCmd(s.engine, msg.database, msg.tables, s.columnCache)
 	case tablesErrMsg:
 		if msg.database != s.currentDB {
 			return s, nil
@@ -408,6 +429,31 @@ func (s dashboardScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		}
 		s.resLoading, s.resErr = false, msg.err
 		return s, nil
+
+	case schemaPrefetchMsg:
+		// A late reply for a database we've since left — the columns would be
+		// for the wrong schema, so drop them rather than merge (v5 3.1).
+		if msg.database != s.currentDB {
+			return s, nil
+		}
+		for table, cols := range msg.columns {
+			s.cacheColumns(table, cols)
+		}
+		return s, nil
+
+	case completeColumnsMsg:
+		// Always worth keeping, even if the picker below doesn't end up
+		// opening — the next completion (or the whole-schema prefetch, once
+		// it reaches this table) reuses it.
+		s.cacheColumns(msg.table, msg.columns)
+		if s.mode != modeBrowse || s.focus != focusEditor {
+			// The user moved on (left the editor, opened another overlay)
+			// before this one-off describe came back — the columns are
+			// cached for next time, but popping the picker now would be
+			// answering a key press that isn't the current one (v5 3.2).
+			return s, nil
+		}
+		return s.showCompleteList(columnCandidates(msg.columns, msg.prefix))
 
 	case usersLoadedMsg:
 		s.usersLoading, s.usersErr = false, nil
@@ -507,6 +553,31 @@ func (s dashboardScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		s.savedList = newSavedModel(msg.items, w, h)
 		return s, nil
 
+	case list.FilterMatchesMsg:
+		// bubbles/list runs its fuzzy filter async (list.filterItems, a tea.Cmd)
+		// and replies with this message; every list-backed overlay's "/" filter
+		// depends on it coming back here, or the input shows what was typed but
+		// the list underneath never narrows. Route it to whichever one is open.
+		switch s.mode {
+		case modeHistory:
+			var cmd tea.Cmd
+			s.historyList.list, cmd = s.historyList.list.Update(msg)
+			return s, cmd
+		case modeSaved:
+			var cmd tea.Cmd
+			s.savedList.list, cmd = s.savedList.list.Update(msg)
+			return s, cmd
+		case modeComplete:
+			var cmd tea.Cmd
+			s.completeList.list, cmd = s.completeList.list.Update(msg)
+			return s, cmd
+		case modeFind:
+			var cmd tea.Cmd
+			s.findList.list, cmd = s.findList.list.Update(msg)
+			return s, cmd
+		}
+		return s, nil
+
 	case tea.KeyPressMsg:
 		return s.handleKey(msg)
 	}
@@ -563,12 +634,18 @@ func (s dashboardScreen) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s.startCount()
 	case key.Matches(msg, Keys.Filter):
 		return s.startFilter()
+	case key.Matches(msg, Keys.Find):
+		return s.startFind()
+	case key.Matches(msg, Keys.ViewRow):
+		return s.openRowDetail()
 	case key.Matches(msg, Keys.Backup):
 		return s.startBackup()
 	case key.Matches(msg, Keys.SchemaDiff):
 		return s.startSchemaDiff()
 	case key.Matches(msg, Keys.Plan):
 		return s.startPlan(false)
+	case key.Matches(msg, Keys.Format):
+		return s.formatEditor()
 	case key.Matches(msg, Keys.Migrations):
 		return s.startMigrations()
 	case key.Matches(msg, Keys.Focus):
@@ -828,6 +905,18 @@ func (s dashboardScreen) Help() []key.Binding {
 			key.NewBinding(key.WithKeys("alt+d"), key.WithHelp("⌥d", "default")),
 			Keys.Back,
 		}
+	case modeFind:
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
+			Keys.Up, Keys.Down,
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "jump")),
+			Keys.Back,
+		}
+	case modeRowDetail:
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "scroll")),
+			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close")),
+		}
 	}
 	// A running statement can only be cancelled.
 	if s.querying {
@@ -835,21 +924,21 @@ func (s dashboardScreen) Help() []key.Binding {
 	}
 	// The editor advertises its own run/history/saved/complete keys.
 	if s.focus == focusEditor {
-		return []key.Binding{Keys.Run, Keys.Plan, Keys.Complete, Keys.History, Keys.HistoryList, Keys.SaveQuery, Keys.SavedList, Keys.Focus, Keys.Back}
+		return []key.Binding{Keys.Run, Keys.Plan, Keys.Format, Keys.Complete, Keys.History, Keys.HistoryList, Keys.SaveQuery, Keys.SavedList, Keys.Focus, Keys.Back}
 	}
 	b := []key.Binding{Keys.Focus, Keys.Up, Keys.Down}
 	switch s.focus {
 	case focusDatabases:
-		b = append(b, Keys.Select, Keys.Create, Keys.Delete, Keys.Backup, Keys.SchemaDiff, Keys.Migrations, Keys.YankURL)
+		b = append(b, Keys.Select, Keys.Find, Keys.Create, Keys.Delete, Keys.Backup, Keys.SchemaDiff, Keys.Migrations, Keys.YankURL)
 	case focusTables:
-		b = append(b, Keys.Select, Keys.Info, Keys.InsertRow, Keys.Filter, Keys.RowCount, Keys.Truncate, Keys.Migrations)
+		b = append(b, Keys.Select, Keys.Find, Keys.Info, Keys.InsertRow, Keys.Filter, Keys.RowCount, Keys.Truncate, Keys.Migrations)
 	case focusUsers:
-		b = append(b, Keys.Create, Keys.Delete, Keys.Grant, Keys.EditUser)
+		b = append(b, Keys.Find, Keys.Create, Keys.Delete, Keys.Grant, Keys.EditUser)
 	case focusResults:
 		b = append(b,
 			key.NewBinding(key.WithKeys("left", "right"), key.WithHelp("←/→", "columns")),
 			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "inspect cell")),
-			Keys.EditCell, Keys.InsertRow, Keys.DeleteRow, Keys.Filter, Keys.CopyCell, Keys.CopyRow, Keys.Export,
+			Keys.ViewRow, Keys.EditCell, Keys.InsertRow, Keys.DeleteRow, Keys.Filter, Keys.CopyCell, Keys.CopyRow, Keys.Export,
 		)
 	}
 	b = append(b, Keys.Edit, Keys.HistoryList, Keys.SavedList, Keys.Refresh, Keys.Back)

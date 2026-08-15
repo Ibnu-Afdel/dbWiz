@@ -102,6 +102,9 @@ func (s dashboardScreen) handleEditorKey(msg tea.KeyPressMsg) (dashboardScreen, 
 	case key.Matches(msg, Keys.Plan):
 		// Explain the statement being written, without leaving the editor (v4 2.4).
 		return s.startPlan(false)
+	case key.Matches(msg, Keys.Format):
+		// Reformat the statement being written, without leaving the editor (v5 2.2).
+		return s.formatEditor()
 	}
 	// The modal editor owns esc (insert→normal, normal→leave), the history cycle,
 	// motions, and typing (v2 2.4).

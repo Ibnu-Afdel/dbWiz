@@ -105,6 +105,10 @@ type KeyMap struct {
 	// Plan shows how the engine would run the editor's statement (v4 2.4).
 	Plan key.Binding
 
+	// Format reformats the editor's statement into clause-per-line,
+	// keyword-cased SQL (v5 2.2).
+	Format key.Binding
+
 	// Migrations reports what the current database's migration ledger says —
 	// which tool manages it, and how far it has got (v4 3.4).
 	Migrations key.Binding
@@ -113,6 +117,15 @@ type KeyMap struct {
 	// the clipboard (v3 1.2). It shares 'y' with CopyCell but fires only on the
 	// databases pane, where no cell is selected, so the two never collide.
 	YankURL key.Binding
+
+	// Find opens a type-to-filter jump list over whichever navigator pane
+	// (databases/tables/users) has focus, so a long list doesn't have to be
+	// scrolled by hand (v5 1.1).
+	Find key.Binding
+
+	// ViewRow opens every column of the selected results row as a scrollable
+	// list, for tables too wide to read across the grid (v5 1.2).
+	ViewRow key.Binding
 }
 
 // Keys is the single instance every screen and the root model share.
@@ -310,6 +323,13 @@ var Keys = KeyMap{
 		key.WithKeys("alt+p"),
 		key.WithHelp("⌥p", "query plan"),
 	),
+	// alt+f reformats the editor. A modifier combo like its neighbours
+	// alt+h/alt+w/alt+s/alt+e/alt+p, so it works mid-type instead of just
+	// inserting the letter f.
+	Format: key.NewBinding(
+		key.WithKeys("alt+f"),
+		key.WithHelp("⌥f", "format SQL"),
+	),
 	// M reports the current database's migration state. A capital letter like its
 	// neighbours B and S, which are the other whole-database actions.
 	Migrations: key.NewBinding(
@@ -321,5 +341,17 @@ var Keys = KeyMap{
 	YankURL: key.NewBinding(
 		key.WithKeys("y"),
 		key.WithHelp("y", "yank url"),
+	),
+	// f opens the find-and-jump overlay for the focused navigator pane. A plain
+	// letter, safe because it only fires while browsing (never while typing).
+	Find: key.NewBinding(
+		key.WithKeys("f"),
+		key.WithHelp("f", "find"),
+	),
+	// v views the selected row's every column — a plain letter, safe because it
+	// only fires in the results pane.
+	ViewRow: key.NewBinding(
+		key.WithKeys("v"),
+		key.WithHelp("v", "view row"),
 	),
 }

@@ -102,6 +102,29 @@ type (
 		err      *db.DBError
 	}
 
+	// schemaPrefetchMsg carries the columns of every table a background
+	// describe pass reached after a table list loaded (v5 3.1) — a cache
+	// warm-up for autocomplete, not a user-visible action, so there's no
+	// error variant: a table that failed to describe is just missing from
+	// columns, silently, and completes normally once actually browsed.
+	schemaPrefetchMsg struct {
+		database string
+		columns  map[string][]string
+	}
+
+	// completeColumnsMsg answers a just-in-time single-table describe
+	// (fetchColumnsForCompleteCmd, v5 3.2) — the fallback for a `table.`
+	// completion whose table the background prefetch hasn't reached yet.
+	// prefix is carried through so the picker that opens on arrival is
+	// filtered exactly as it would have been synchronously; columns is nil
+	// on a describe failure, which openComplete's caller renders as "no
+	// completions" rather than an error.
+	completeColumnsMsg struct {
+		table   string
+		prefix  string
+		columns []string
+	}
+
 	// Admin (Phase 6) loads and mutations. usersLoadedMsg feeds the navigator's
 	// users section; adminDoneMsg reports a completed mutation with a toast and
 	// which lists to reload; adminErrMsg is a typed failure shown inline.
@@ -556,6 +579,74 @@ func loadTablesCmd(engine db.Engine, database string) tea.Cmd {
 			return tablesErrMsg{database: database, err: asDBError(err)}
 		}
 		return tablesLoadedMsg{database: database, tables: tables}
+	}
+}
+
+// prefetchTimeout bounds the whole background schema-prefetch pass
+// (prefetchColumnsCmd, v5 3.1), not one describe within it — generous
+// relative to browseTimeout because it's a background cache warm-up with no
+// user waiting on it, and prefetchColumnsMax already bounds the worst case
+// on a very wide schema.
+const prefetchTimeout = 60 * time.Second
+
+// prefetchColumnsCmd warms the autocomplete column cache for every table in
+// tables that known doesn't already cover, up to prefetchColumnsMax (v5
+// 3.1). It runs after every table-list load, so a database switch or a
+// manual refresh (Keys.Refresh) both keep it current; tables already in
+// known are skipped, so a repeat load of the same database costs nothing
+// extra. A single table's describe failure (a permission gap, say) is
+// skipped rather than surfaced — this is a cache warm-up, not a
+// user-initiated action, so it fails silently and completes normally for
+// every other table.
+func prefetchColumnsCmd(engine db.Engine, database string, tables []db.Table, known map[string][]string) tea.Cmd {
+	return func() tea.Msg {
+		if len(tables) == 0 {
+			return schemaPrefetchMsg{database: database}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), prefetchTimeout)
+		defer cancel()
+		columns := map[string][]string{}
+		fetched := 0
+		for _, t := range tables {
+			if fetched >= prefetchColumnsMax {
+				break
+			}
+			if _, ok := known[t.Name]; ok {
+				continue
+			}
+			cols, err := engine.DescribeTable(ctx, database, t.Name)
+			if err != nil {
+				continue
+			}
+			names := make([]string, len(cols))
+			for i, c := range cols {
+				names[i] = c.Name
+			}
+			columns[t.Name] = names
+			fetched++
+		}
+		return schemaPrefetchMsg{database: database, columns: columns}
+	}
+}
+
+// fetchColumnsForCompleteCmd describes exactly one table for a `table.`
+// completion whose columns aren't cached yet (v5 3.2) — a single round trip,
+// not the whole-schema walk prefetchColumnsCmd does. prefix rides along so
+// the picker that opens on arrival filters the same way it would have
+// synchronously.
+func fetchColumnsForCompleteCmd(engine db.Engine, database, table, prefix string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), browseTimeout)
+		defer cancel()
+		cols, err := engine.DescribeTable(ctx, database, table)
+		if err != nil {
+			return completeColumnsMsg{table: table, prefix: prefix}
+		}
+		names := make([]string, len(cols))
+		for i, c := range cols {
+			names[i] = c.Name
+		}
+		return completeColumnsMsg{table: table, prefix: prefix, columns: names}
 	}
 }
 

@@ -71,8 +71,10 @@ func Groups() []Group {
 		{
 			Title: "Browsing data",
 			Entries: []Entry{
+				{Keys.Find, "On the databases, tables, or users pane: type part of a name to jump straight to it, instead of scrolling."},
 				{Keys.Filter, "Add a WHERE condition to the preview without writing a query."},
 				{Keys.RowCount, "Count the table's rows exactly, rather than the stored estimate."},
+				{Keys.ViewRow, "On the results pane: show every column of the selected row as a scrollable list, for tables too wide for the grid."},
 				{Keys.CopyCell, "On the results pane: copy the selected cell to the clipboard (works over SSH)."},
 				{Keys.CopyRow, "On the results pane: copy the whole selected row."},
 				{Keys.Export, "Export the current result to a CSV or JSON file."},
@@ -94,6 +96,7 @@ func Groups() []Group {
 				{Keys.Run, "Run the statement in the editor."},
 				{Keys.Cancel, "While a statement runs: cancel it, server-side."},
 				{Keys.Plan, "Show how the engine would run this statement, and what's expensive about it."},
+				{Keys.Format, "Reformat the statement into clause-per-line, keyword-cased SQL."},
 				{Keys.Complete, "Complete a table or column name from what browsing already loaded."},
 				{Keys.History, "Step back and forward through statements you've run."},
 				{Keys.HistoryList, "Search your history for this target."},

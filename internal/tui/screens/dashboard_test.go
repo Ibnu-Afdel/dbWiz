@@ -24,6 +24,14 @@ type fakeEngine struct {
 	preview   db.Result
 	columns   []db.Column
 
+	// columnsByTable, when set, answers DescribeTable per table name instead
+	// of the single canned columns above — v5 3.2's qualified completion
+	// needs two tables with genuinely different columns to prove `t.` picks
+	// the right one.
+	columnsByTable map[string][]db.Column
+	describeErr    error // if set, DescribeTable fails (for every table)
+	describeCalls  int   // counts DescribeTable calls, for prefetch-cap tests
+
 	tablesErr error // if set, ListTables fails
 
 	// Query scripting (Phase 7).
@@ -98,6 +106,13 @@ func (f *fakeEngine) ListTables(_ context.Context, database string) ([]db.Table,
 }
 func (f *fakeEngine) DescribeTable(_ context.Context, _, table string) ([]db.Column, error) {
 	f.lastDescribeTbl = table
+	f.describeCalls++
+	if f.describeErr != nil {
+		return nil, f.describeErr
+	}
+	if f.columnsByTable != nil {
+		return f.columnsByTable[table], nil
+	}
 	return f.columns, nil
 }
 func (f *fakeEngine) PreviewRows(_ context.Context, database, table string, _ int) (db.Result, error) {

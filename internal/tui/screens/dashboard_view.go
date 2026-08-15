@@ -201,6 +201,10 @@ func (s dashboardScreen) renderOverlay(width, height int) string {
 		body = s.migrationsView(width)
 	case modeSchemaDiff:
 		body = s.schemaDiffView(width)
+	case modeFind:
+		body = s.findList.View(width)
+	case modeRowDetail:
+		return s.renderRowDetailOverlay(width, height)
 	}
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, body)
 }
