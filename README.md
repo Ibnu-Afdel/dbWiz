@@ -33,6 +33,13 @@ curl -fsSL https://raw.githubusercontent.com/Ibnu-Afdel/dbWiz/main/install.sh | 
 
 The script downloads the static binary for your CPU (x86_64 or arm64), verifies its SHA-256 checksum, and installs it to `~/.local/bin` — no sudo. ([Read it first](install.sh) if you like; `DBWIZ_VERSION` and `DBWIZ_INSTALL_DIR` override the defaults.)
 
+On Arch or Omarchy, from the [AUR](https://aur.archlinux.org/packages/dbwiz-bin) (includes shell completions):
+
+```bash
+yay -S dbwiz-bin                 # or any AUR helper
+omarchy pkg aur add dbwiz-bin    # the Omarchy way
+```
+
 With Go:
 
 ```bash
