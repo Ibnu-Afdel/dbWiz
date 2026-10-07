@@ -98,7 +98,7 @@ func (s dashboardScreen) updatePlan(msg tea.KeyPressMsg) (dashboardScreen, tea.C
 		}
 		return s, nil
 	case "down", "j":
-		if s.plan.offset < len(s.plan.lines)-planRows {
+		if s.plan.offset < len(s.planDisplayLines(s.width))-planRows {
 			s.plan.offset++
 		}
 		return s, nil
@@ -106,7 +106,7 @@ func (s dashboardScreen) updatePlan(msg tea.KeyPressMsg) (dashboardScreen, tea.C
 		s.plan.offset = max(0, s.plan.offset-planRows)
 		return s, nil
 	case "pgdown":
-		s.plan.offset = min(max(0, len(s.plan.lines)-planRows), s.plan.offset+planRows)
+		s.plan.offset = min(max(0, len(s.planDisplayLines(s.width))-planRows), s.plan.offset+planRows)
 		return s, nil
 	}
 	return s, nil
@@ -148,10 +148,65 @@ func planCmd(engine db.Engine, statement string, analyze bool, seq int) tea.Cmd 
 	}
 }
 
+// planInner is the text width inside the plan overlay for a window width.
+func planInner(width int) int { return clamp(width-8, 40, 110) }
+
+// planDisplayLines is the report as the overlay shows it: every line wrapped to
+// the box rather than cut off, so the advice under "What stands out" — the part
+// worth reading — is never lost past the right edge. Scrolling counts these.
+func (s dashboardScreen) planDisplayLines(width int) []string {
+	inner := planInner(width)
+	var out []string
+	for _, line := range s.plan.lines {
+		out = append(out, wrapHanging(line, inner)...)
+	}
+	return out
+}
+
+// wrapHanging word-wraps one plain-text report line to width, indenting the
+// continuation lines under the line's text: past its leading spaces and any
+// "-> " or "! " marker, so a wrapped step or hint still reads as one item.
+func wrapHanging(line string, width int) []string {
+	if lipgloss.Width(line) <= width {
+		return []string{line}
+	}
+	body := strings.TrimLeft(line, " ")
+	hang := len(line) - len(body)
+	for _, marker := range []string{"-> ", "! "} {
+		if strings.HasPrefix(body, marker) {
+			hang += len(marker)
+			break
+		}
+	}
+	if hang > width/2 {
+		hang = width / 2
+	}
+
+	var out []string
+	cur := line[:len(line)-len(body)]
+	curWidth := lipgloss.Width(cur)
+	fresh := true // nothing but indentation on cur yet
+	for _, word := range strings.Fields(body) {
+		w := lipgloss.Width(word)
+		if !fresh && curWidth+1+w > width {
+			out = append(out, cur)
+			cur, curWidth, fresh = strings.Repeat(" ", hang), hang, true
+		}
+		if !fresh {
+			cur += " "
+			curWidth++
+		}
+		cur += word
+		curWidth += w
+		fresh = false
+	}
+	return append(out, cur)
+}
+
 // planView renders the current phase.
 func (s dashboardScreen) planView(width int) string {
 	p := s.plan
-	inner := clamp(width-8, 40, 110)
+	inner := planInner(width)
 	var lines []string
 
 	switch p.phase {
@@ -176,12 +231,16 @@ func (s dashboardScreen) planView(width int) string {
 			break
 		}
 		lines = append(lines, styles.Title.Render("Query plan"), "")
-		end := min(len(p.lines), p.offset+planRows)
-		for _, line := range p.lines[p.offset:end] {
+		shown := s.planDisplayLines(width)
+		start := min(p.offset, max(0, len(shown)-planRows))
+		end := min(len(shown), start+planRows)
+		for _, line := range shown[start:end] {
+			// Wrapping keeps lines within the box; fitLine still guards a single
+			// word wider than it.
 			lines = append(lines, fitLine(line, inner))
 		}
 		hint := "esc close"
-		if len(p.lines) > planRows {
+		if len(shown) > planRows {
 			hint = "↑/↓ scroll · esc close"
 		}
 		if !p.analyzed {

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/Ibnu-Afdel/dbwiz/internal/db"
 )
@@ -286,5 +287,57 @@ func TestPlanLeavesTheConnectionAlone(t *testing.T) {
 	}
 	if eng.lastListTables != "" || eng.lastMutationSQL != "" {
 		t.Errorf("a plan should touch nothing else: listTables=%q mutation=%q", eng.lastListTables, eng.lastMutationSQL)
+	}
+}
+
+// TestWrapHanging: a long report line wraps under its own text instead of being
+// cut off at the box edge.
+func TestWrapHanging(t *testing.T) {
+	advice := "    If this step filters or joins on a column, an index on that column lets the engine jump straight to the matching rows."
+	got := wrapHanging(advice, 50)
+	if len(got) < 2 {
+		t.Fatalf("expected a wrap, got %q", got)
+	}
+	for _, l := range got {
+		if lipgloss.Width(l) > 50 {
+			t.Errorf("line wider than the box: %q", l)
+		}
+		if !strings.HasPrefix(l, "    ") {
+			t.Errorf("continuation lost the indent: %q", l)
+		}
+	}
+	if joined := strings.Join(strings.Fields(strings.Join(got, " ")), " "); joined != strings.Join(strings.Fields(advice), " ") {
+		t.Errorf("wrapping changed the words:\n%s", joined)
+	}
+
+	// Hint and step markers hang their continuation under the text.
+	hint := wrapHanging("  ! Full scan on orders: Every row of orders is read, which is slow on a big table.", 40)
+	if !strings.HasPrefix(hint[1], "    ") || strings.HasPrefix(hint[1], "     ") {
+		t.Errorf("hint continuation should align after \"! \": %q", hint[1])
+	}
+
+	if short := wrapHanging("-> Query plan", 50); len(short) != 1 || short[0] != "-> Query plan" {
+		t.Errorf("a short line should pass through, got %q", short)
+	}
+}
+
+// TestPlanScrollReachesWrappedEnd: scrolling counts displayed (wrapped) lines,
+// so the last piece of advice in a long plan is still reachable.
+func TestPlanScrollReachesWrappedEnd(t *testing.T) {
+	s, _ := planning(t)
+	s, _ = press(s, altP)
+
+	report := make([]string, 0, planRows+5)
+	for range planRows + 4 {
+		report = append(report, "  ! Temporary b-tree: An intermediate table is built to hold the results while they're ordered or grouped and that takes a while.")
+	}
+	report = append(report, "THE-END")
+	s = feed(s, planDoneMsg{seq: s.planSeq, report: strings.Join(report, "\n")})
+
+	for range 20 {
+		s, _ = press(s, tea.KeyPressMsg{Code: tea.KeyPgDown})
+	}
+	if view := s.planView(s.width); !strings.Contains(view, "THE-END") {
+		t.Fatalf("the last line is unreachable after scrolling:\n%s", view)
 	}
 }
