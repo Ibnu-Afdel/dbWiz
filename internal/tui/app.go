@@ -59,6 +59,9 @@ type model struct {
 	keysOffset int
 
 	width, height int
+
+	// theme follows the active Omarchy theme when that's the palette in use.
+	theme themeWatch
 }
 
 func newModel() model {
@@ -84,8 +87,9 @@ func (m *model) setTop(s screens.Screen) {
 	st[len(st)-1] = s
 }
 
-// Init starts the first screen (detection) running.
-func (m model) Init() tea.Cmd { return m.top().Init() }
+// Init starts the first screen (detection) running, plus the theme poll when
+// DBWiz is following the Omarchy theme.
+func (m model) Init() tea.Cmd { return tea.Batch(m.top().Init(), m.theme.tick()) }
 
 // Update handles global concerns and navigation, then delegates everything else
 // to the active screen. Navigation and tab messages are intercepted here so
@@ -117,6 +121,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case screens.QuitMsg:
 		return m, tea.Quit
+	case themeTickMsg:
+		// Styles are read at render time, so re-applying the palette is enough;
+		// the view redraws after this Update.
+		m.theme = m.theme.refresh()
+		return m, m.theme.tick()
 	}
 
 	return m.delegate(msg)
@@ -234,7 +243,13 @@ func (m model) resize() tea.Cmd {
 // View renders the tab bar (only when more than one tab is open), the active
 // screen, and the help bar pinned at the bottom.
 func (m model) View() tea.View {
-	helpBar := m.help.View(flatKeys{bindings: m.helpBindings()})
+	h := m.help
+	if m.theme.path != "" {
+		// Following the desktop theme: recolor the help bar too, which otherwise
+		// keeps bubbles' own grays.
+		h.Styles = styles.Help()
+	}
+	helpBar := h.View(flatKeys{bindings: m.helpBindings()})
 
 	var header string
 	// The help bar is one row normally, but "?" expands it into a stacked list of
@@ -255,6 +270,10 @@ func (m model) View() tea.View {
 
 	v := tea.NewView(header + body + "\n" + styles.Hint.Render(helpBar))
 	v.AltScreen = true // full-window program; restores the terminal on exit
+	// A stable title lets window managers find the DBWiz window — Omarchy's
+	// launch-or-focus matches on it to focus a running DBWiz instead of opening
+	// a second one.
+	v.WindowTitle = "DBWiz"
 	return v
 }
 
@@ -345,10 +364,12 @@ func Run() error {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "dbwiz: "+err.Error())
 	}
-	styles.Apply(cfg.Theme)
+	watch := applyTheme(cfg.Theme)
 	screens.ApplyConfig(cfg)
 
-	p := tea.NewProgram(newModel())
+	m := newModel()
+	m.theme = watch
+	p := tea.NewProgram(m)
 	_, err = p.Run()
 	return err
 }

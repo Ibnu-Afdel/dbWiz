@@ -55,6 +55,8 @@ That's it — no config files, no connection strings.
 
 On [Omarchy](https://omarchy.org) machines (Omarchy 4 and the older 3.x layout) DBWiz recognizes the stock database containers from `omarchy install docker dbs`, tags them with an `[omarchy]` badge, and uses their known default credentials — so `dbwiz` → pick a database → you're in, with no prompts. `dbwiz setup` creates the exact same containers, so the two are interchangeable.
 
+**Follows your theme.** DBWiz paints with the active Omarchy theme's palette (accent, text, muted, red/green/yellow) and recolors live when you switch themes — no restart. Set `theme = "default"` (or another named theme) in the config to opt out.
+
 **Docker access.** Omarchy 4 deliberately leaves your user out of the `docker` group and reaches Docker through a sudo/polkit prompt. DBWiz respects that: it never escalates on its own. Either launch it as `dbwiz --sudo` (one password prompt, used only for DBWiz's `docker` calls), press `s` when it says it can't reach Docker, or opt in to sudoless Docker the Omarchy way — `omarchy setup security sudoless docker` (Setup › Security › Sudoless Docker), then reboot.
 
 ## Configuration (optional)
@@ -64,7 +66,7 @@ DBWiz needs no configuration — everything works out of the box. But you can dr
 ```toml
 # ~/.config/dbwiz/config.toml — every field is optional
 
-theme = "default"          # "default", "high-contrast", or "warm"
+theme = "omarchy"          # "omarchy", "default", "high-contrast", or "warm" (unset = auto)
 default_row_limit = 200    # rows a table preview pulls
 
 [[target]]

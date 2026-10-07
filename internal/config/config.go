@@ -22,8 +22,10 @@ import (
 // Config is the whole config document. Every field is optional; the zero value
 // is a valid, do-nothing config.
 type Config struct {
-	// Theme names a color preference applied at startup (see styles.Apply). An
-	// unknown name falls back to the default palette.
+	// Theme names a color preference applied at startup. Empty means auto: the
+	// live Omarchy theme on an Omarchy machine, the default palette elsewhere.
+	// "omarchy" asks for the Omarchy palette explicitly; an unknown name falls
+	// back to the default palette.
 	Theme string `toml:"theme"`
 	// DefaultRowLimit overrides how many rows a table preview pulls. Zero or
 	// negative means "use the built-in default".

@@ -12,6 +12,7 @@ import (
 	"image/color"
 	"strings"
 
+	"charm.land/bubbles/v2/help"
 	"charm.land/lipgloss/v2"
 )
 
@@ -27,6 +28,11 @@ var (
 	Warning = lipgloss.Color("214") // caution
 	Muted   = lipgloss.Color("245") // secondary / de-emphasized text
 	Text    = lipgloss.Color("252") // primary body text
+
+	// OnAccent and OnDanger are the text colors drawn on an Accent or Danger
+	// background (the active tab, the REMOTE badge).
+	OnAccent = lipgloss.Color("0")
+	OnDanger = lipgloss.Color("231")
 )
 
 // theme is a named palette variant. Only the accent and text tones vary; the
@@ -56,6 +62,36 @@ func Apply(name string) {
 		th = themes["default"]
 	}
 	Accent, Muted, Text = th.accent, th.muted, th.text
+	Success, Danger, Warning = lipgloss.Color("42"), lipgloss.Color("196"), lipgloss.Color("214")
+	OnAccent, OnDanger = lipgloss.Color("0"), lipgloss.Color("231")
+	rebuild()
+}
+
+// HexPalette is a full truecolor palette, "#rrggbb" per role — what an
+// external theme source (the active Omarchy theme) supplies. Unlike the named
+// themes it sets the semantic colors too, so errors and successes match the
+// desktop's own red and green.
+type HexPalette struct {
+	Accent, Muted, Text      string
+	Success, Danger, Warning string
+	Background               string // the theme's background, drawn as text on Accent/Danger
+}
+
+// ApplyHex installs a HexPalette and rebuilds the shared styles. Empty
+// semantic roles keep the built-in colors.
+func ApplyHex(p HexPalette) {
+	Accent, Muted, Text = lipgloss.Color(p.Accent), lipgloss.Color(p.Muted), lipgloss.Color(p.Text)
+	Success, Danger, Warning = lipgloss.Color("42"), lipgloss.Color("196"), lipgloss.Color("214")
+	if p.Success != "" {
+		Success = lipgloss.Color(p.Success)
+	}
+	if p.Danger != "" {
+		Danger = lipgloss.Color(p.Danger)
+	}
+	if p.Warning != "" {
+		Warning = lipgloss.Color(p.Warning)
+	}
+	OnAccent, OnDanger = lipgloss.Color(p.Background), lipgloss.Color(p.Background)
 	rebuild()
 }
 
@@ -112,7 +148,7 @@ func rebuild() {
 	Badge = lipgloss.NewStyle().Foreground(Warning)
 	// DangerBadge is inverse (danger background, light text) so REMOTE reads as a
 	// warning label, not just colored text.
-	DangerBadge = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("231")).Background(Danger)
+	DangerBadge = lipgloss.NewStyle().Bold(true).Foreground(OnDanger).Background(Danger)
 
 	DangerText = lipgloss.NewStyle().Foreground(Danger)
 	SuccessText = lipgloss.NewStyle().Foreground(Success)
@@ -142,12 +178,28 @@ func rebuild() {
 	PaneTitle = lipgloss.NewStyle().Bold(true).Foreground(Muted)
 	PaneTitleFocused = lipgloss.NewStyle().Bold(true).Foreground(Accent)
 
-	TabActive = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(Accent)
+	TabActive = lipgloss.NewStyle().Bold(true).Foreground(OnAccent).Background(Accent)
 	TabInactive = lipgloss.NewStyle().Foreground(Muted)
 
 	TableHeader = lipgloss.NewStyle().Bold(true).Foreground(Accent)
 	NullText = lipgloss.NewStyle().Faint(true).Foreground(Muted).Italic(true)
 	TableSelected = lipgloss.NewStyle().Reverse(true)
+}
+
+// Help returns help-bar styles drawn from the current palette: keys in body
+// text, descriptions and separators muted.
+func Help() help.Styles {
+	key := lipgloss.NewStyle().Foreground(Text)
+	desc := lipgloss.NewStyle().Foreground(Muted)
+	return help.Styles{
+		Ellipsis:       desc,
+		ShortKey:       key,
+		ShortDesc:      desc,
+		ShortSeparator: desc,
+		FullKey:        key,
+		FullDesc:       desc,
+		FullSeparator:  desc,
+	}
 }
 
 func init() { rebuild() }
