@@ -156,6 +156,13 @@ func (s homeScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		return s, Replace(NewDetect())
 	case startErrMsg:
 		return s, Replace(NewErrorFromDocker(msg.err, retryRescan))
+	case sqliteOpenedMsg:
+		// "Continue where you left off" reopened the last SQLite file.
+		return s, openedSQLiteDashboard(msg)
+	case sqliteErrMsg:
+		// No retry key: its result would land on the error screen, not here.
+		// Back returns to this menu, where the continue row is still offered.
+		return s, Push(NewErrorFromDB(msg.err, retrySpec{}))
 	case spinner.TickMsg:
 		if !s.starting {
 			return s, nil

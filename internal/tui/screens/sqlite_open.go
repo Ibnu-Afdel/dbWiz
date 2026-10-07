@@ -61,11 +61,7 @@ func (s sqliteOpenScreen) CapturesText() bool { return true }
 func (s sqliteOpenScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sqliteOpenedMsg:
-		rememberSQLite(msg.path) // persist last + recent across sessions (Step 1.2/1.3)
-		return s, Push(NewDashboard(msg.engine, msg.target, docker.Container{
-			Name:   filepath.Base(msg.path),
-			Engine: docker.EngineUnknown,
-		}))
+		return s, openedSQLiteDashboard(msg)
 	case sqliteErrMsg:
 		s.errMsg = plainError(msg.err)
 		return s, nil
@@ -176,6 +172,17 @@ func openSQLiteCmd(path string) tea.Cmd {
 		}
 		return sqliteOpenedMsg{engine: engine, target: target, path: expanded}
 	}
+}
+
+// openedSQLiteDashboard remembers a just-opened SQLite file (last + recent,
+// across sessions) and pushes its dashboard. Every route that opens a file —
+// this screen and the home menu's "continue where you left off" — finishes here.
+func openedSQLiteDashboard(msg sqliteOpenedMsg) tea.Cmd {
+	rememberSQLite(msg.path)
+	return Push(NewDashboard(msg.engine, msg.target, docker.Container{
+		Name:   filepath.Base(msg.path),
+		Engine: docker.EngineUnknown,
+	}))
 }
 
 // expandTilde replaces a leading ~ with the user's home directory.
