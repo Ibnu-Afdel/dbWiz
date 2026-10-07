@@ -3,6 +3,17 @@
 All notable changes to DBWiz are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## v1.1.1 — fixes
+
+### Fixed
+
+- **"Continue where you left off" now works for SQLite files.** It opened the
+  file but stayed on the home menu; it now lands on the database's dashboard,
+  and a file that fails to open shows an error instead of nothing.
+- **The query plan no longer cuts lines off.** Long statements and the advice
+  under "What stands out" wrap inside the overlay instead of being truncated
+  mid-word, and scrolling reaches the end of a long plan.
+
 ## v1.1.0 — tabs, remote targets, schema tools, and built in for Omarchy 4
 
 Everything since v1.0.0: work with several databases at once, change data from
