@@ -3,10 +3,41 @@
 All notable changes to DBWiz are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## Unreleased — built in for Omarchy 4
+## v1.1.0 — tabs, remote targets, schema tools, and built in for Omarchy 4
+
+Everything since v1.0.0: work with several databases at once, change data from
+the browser, reach databases beyond local Docker, script it all from the CLI,
+and feel at home on Omarchy 4.
 
 ### Added
 
+- **Tabs** — several connections open at once (`Ctrl+T` / `Ctrl+W`, `1`–`9` to
+  switch, tmux-friendly). DBWiz remembers the last target and offers to continue
+  on relaunch, and keeps your recent SQLite files.
+- **Change data from the browser** — edit a cell, insert a row from a generated
+  form, or delete a row, always previewing the exact `UPDATE` / `INSERT` /
+  `DELETE` first. Plus truncate, exact row counts, and a quick `WHERE` filter.
+- **Query workflow** — autocomplete for tables, columns, and functions; a SQL
+  formatter; copy a cell or row; a full-row viewer for wide tables; and an
+  optional vim-style editor (`[editor] vim = true`).
+- **Query plans in plain language** — `⌥p` (or `dbwiz explain`) turns `EXPLAIN`
+  into a readable tree with the slow parts flagged.
+- **Schema tools** — capture a schema, diff two of them, and export DDL
+  (`dbwiz schema`); framework-aware hints show which migration a database is on
+  (`dbwiz migrations`).
+- **Backup and restore** — from the TUI (`B`) or `dbwiz dump` / `dbwiz restore`.
+- **Beyond local Docker** — connect any host/port Postgres or MySQL, tunnel
+  through SSH, and scan a server's Docker over SSH (`dbwiz list --ssh`).
+  Non-local targets wear a REMOTE badge and ask for an extra confirmation
+  before anything destructive.
+- **Provisioning and health** — `dbwiz setup` creates Omarchy-compatible
+  database containers; `dbwiz health` runs a connectivity self-check; `dbwiz url`
+  prints a connection URL; `dbwiz ext` manages Postgres extensions.
+- **Scripting surface** — `dbwiz use`, `list`, `query`, `create`, `drop`, and
+  `keys` for shell scripts and CI; `F1` shows every key, from the same catalogue
+  the handlers use.
+- **Opt-in config** — `~/.config/dbwiz/config.toml` for theme, row limit, and
+  saved targets.
 - **Follows the Omarchy theme, live** — on Omarchy, DBWiz paints with the active
   theme's palette and recolors as soon as you switch themes. `theme = "default"`
   (or any named theme) opts out.
@@ -19,6 +50,8 @@ All notable changes to DBWiz are documented here. This project adheres to
 
 ### Changed
 
+- **Dashboard navigation and SQL editing** reworked: type-to-jump with `f`,
+  `e` to reach the editor from anywhere.
 - **Omarchy 4 detection** — recognizes the packaged install (`$OMARCHY_PATH`,
   `/usr/share/omarchy`) as well as the Omarchy 3 layout.
 - **Docker permission errors** now suggest Omarchy's own opt-in
