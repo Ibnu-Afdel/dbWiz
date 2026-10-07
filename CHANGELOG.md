@@ -3,6 +3,29 @@
 All notable changes to DBWiz are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## Unreleased — built in for Omarchy 4
+
+### Added
+
+- **Follows the Omarchy theme, live** — on Omarchy, DBWiz paints with the active
+  theme's palette and recolors as soon as you switch themes. `theme = "default"`
+  (or any named theme) opts out.
+- **`dbwiz desktop install` / `remove`** — an app-launcher entry and icon on any
+  Linux desktop. On Omarchy it opens via launch-or-focus and adds a Databases
+  section to the Omarchy menu (`--no-menu` to skip).
+- **`--sudo` (or `DBWIZ_SUDO=1`)** — when your user can't reach the Docker socket,
+  authorize sudo once and DBWiz runs only its `docker` calls through it. In the
+  TUI, press `s` on the permission screen to do the same.
+
+### Changed
+
+- **Omarchy 4 detection** — recognizes the packaged install (`$OMARCHY_PATH`,
+  `/usr/share/omarchy`) as well as the Omarchy 3 layout.
+- **Docker permission errors** now suggest Omarchy's own opt-in
+  (`omarchy setup security sudoless docker`) on Omarchy, and notice a docker-group
+  change that's still waiting on a reboot.
+- The empty state points at `omarchy install docker dbs`.
+
 ## v1.0.0 — MVP: find it, browse it, admin it, query it
 
 The first release. Launch `dbwiz` on a machine with a Docker database (or a

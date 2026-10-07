@@ -89,6 +89,7 @@ func main() {
 		cmd.NewExtCommand(),
 		cmd.NewSchemaCommand(),
 		cmd.NewMigrationsCommand(),
+		cmd.NewDesktopCommand(),
 	)
 	rootCmd.PersistentFlags().Bool("sudo", false,
 		"reach Docker through sudo when your user can't use its socket (asks for your password once)")

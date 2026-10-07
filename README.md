@@ -36,6 +36,13 @@ go install github.com/Ibnu-Afdel/dbwiz@latest
 
 Or grab a prebuilt static binary from the [Releases](https://github.com/Ibnu-Afdel/dbwiz/releases) page and put it on your `PATH`.
 
+Then, optionally, add it to your app launcher (any Linux desktop; on Omarchy it also joins the Omarchy menu):
+
+```bash
+dbwiz desktop install   # launcher entry + icon (+ Omarchy menu section)
+dbwiz desktop remove    # take it all back out
+```
+
 **Requirements:** Linux and the `docker` CLI. If your user can't reach the Docker socket — the default on Omarchy 4, which keeps you out of the root-equivalent `docker` group — run `dbwiz --sudo` (or press `s` on the permission screen): DBWiz asks sudo for your password once and runs only its `docker` calls through it. SQLite files need nothing but the file.
 
 ## Quickstart (30 seconds)
@@ -56,6 +63,8 @@ That's it — no config files, no connection strings.
 On [Omarchy](https://omarchy.org) machines (Omarchy 4 and the older 3.x layout) DBWiz recognizes the stock database containers from `omarchy install docker dbs`, tags them with an `[omarchy]` badge, and uses their known default credentials — so `dbwiz` → pick a database → you're in, with no prompts. `dbwiz setup` creates the exact same containers, so the two are interchangeable.
 
 **Follows your theme.** DBWiz paints with the active Omarchy theme's palette (accent, text, muted, red/green/yellow) and recolors live when you switch themes — no restart. Set `theme = "default"` (or another named theme) in the config to opt out.
+
+**In the launcher and the menu.** `dbwiz desktop install` puts DBWiz in the app launcher, opening through `omarchy-launch-or-focus-tui` — so it starts in your default terminal, or jumps to the DBWiz window that's already open. It also adds a **Databases** section to the Omarchy menu (Open DBWiz · List Databases · Health Check · Add a Database Server) via `~/.config/omarchy/extensions/omarchy-menu.jsonc`; the block is clearly marked, your original file is backed up to `omarchy-menu.jsonc.dbwiz.bak`, and every edit is checked against Omarchy's own parser rules before it's written. Use `--no-menu` to skip the menu. For a dedicated key, the install prints a ready-to-paste `bindings.lua` line (`SUPER + SHIFT + ALT + D` is free by default; `SUPER + SHIFT + D` is Omarchy's Docker TUI).
 
 **Docker access.** Omarchy 4 deliberately leaves your user out of the `docker` group and reaches Docker through a sudo/polkit prompt. DBWiz respects that: it never escalates on its own. Either launch it as `dbwiz --sudo` (one password prompt, used only for DBWiz's `docker` calls), press `s` when it says it can't reach Docker, or opt in to sudoless Docker the Omarchy way — `omarchy setup security sudoless docker` (Setup › Security › Sudoless Docker), then reboot.
 
