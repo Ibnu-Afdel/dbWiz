@@ -146,7 +146,7 @@ func (s setupScreen) View(width, height int) string {
 	var b strings.Builder
 	b.WriteString(styles.Title.Render("Set up a new database server"))
 	b.WriteString("\n")
-	b.WriteString(styles.Subtitle.Render("Omarchy-compatible: same names, ports, and dev auth. No sudo."))
+	b.WriteString(styles.Subtitle.Render("Omarchy-compatible: same names, ports, and dev auth."))
 	b.WriteString("\n")
 	b.WriteString(styles.Hint.Render(rule(width)))
 	b.WriteString("\n")

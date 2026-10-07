@@ -49,7 +49,7 @@ func Exec(ctx context.Context, opts ExecOptions) error {
 
 	args := dockerExecArgs(opts.Container, envNames(opts.Env), opts.Stdin != nil, opts.Args)
 	debuglog.LogExec("docker", args) // args hold only env *names*, never values
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := dockerCommand(ctx, envNames(opts.Env), args...)
 	cmd.Env = append(os.Environ(), opts.Env...)
 	if opts.Stdin != nil {
 		cmd.Stdin = opts.Stdin

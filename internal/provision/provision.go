@@ -4,9 +4,10 @@
 // DBWiz sets up and one Omarchy sets up are interchangeable, and either connects
 // with zero configuration.
 //
-// It differs from Omarchy in one deliberate way: it never uses sudo. A user
-// whose shell can't reach the Docker socket gets DBWiz's usual SocketPermission
-// error (add yourself to the docker group), not a password prompt.
+// It differs from Omarchy in one deliberate way: it never prompts for sudo by
+// itself. A user whose shell can't reach the Docker socket gets DBWiz's usual
+// SocketPermission error with the fix; sudo is used only once the user opts in
+// (--sudo, or [s] in the TUI), via the docker package's sudo mode.
 //
 // It imports docker but never tui/db: the dependency direction is
 // tui/cmd → provision → docker.

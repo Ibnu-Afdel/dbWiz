@@ -17,7 +17,7 @@ const provisionTimeout = 10 * time.Minute
 //
 // Failures classify into the same typed DockerError set as the rest of the
 // package: a host-port clash is PortConflict, a socket-permission denial (the
-// user isn't in the docker group — DBWiz never uses sudo) is SocketPermission, a
+// user isn't in the docker group and sudo mode is off) is SocketPermission, a
 // dead daemon or missing binary surface as themselves. The raw docker stderr is
 // preserved as the Detail so the real reason reaches the user.
 func Run(ctx context.Context, args []string) (string, error) {

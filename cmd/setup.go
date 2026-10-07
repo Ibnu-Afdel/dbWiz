@@ -34,8 +34,9 @@ const setupReadyTimeout = 60 * time.Second
 // not just a database (v3 1.1). It reproduces Omarchy's stock defaults — same
 // name, image, localhost port, and dev-friendly auth — so the result is
 // indistinguishable from an Omarchy-provisioned server and connects with zero
-// configuration. Unlike Omarchy it never uses sudo: a socket-permission failure
-// is reported with the docker-group fix, not escalated.
+// configuration. Unlike Omarchy it never escalates on its own: a
+// socket-permission failure is reported with the fix, and sudo is used only
+// when the user opts in with --sudo.
 func NewSetupCommand() *cobra.Command {
 	var noWait bool
 	cmd := &cobra.Command{
@@ -44,8 +45,8 @@ func NewSetupCommand() *cobra.Command {
 		Long: "Create a new database server as a Docker container, using the same names,\n" +
 			"images, ports, and dev-friendly auth as Omarchy's omarchy-install-docker-dbs,\n" +
 			"so DBWiz and Omarchy provisioning are interchangeable.\n\n" +
-			"Run with no engine to list the choices. DBWiz never uses sudo; if your user\n" +
-			"can't reach the Docker socket, add yourself to the docker group and re-login.",
+			"Run with no engine to list the choices. If your user can't reach the Docker\n" +
+			"socket (the Omarchy 4 default), add --sudo to go through sudo instead.",
 		Args:         cobra.MaximumNArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {

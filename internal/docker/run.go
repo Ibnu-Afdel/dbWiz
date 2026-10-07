@@ -5,10 +5,11 @@ import (
 	"context"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Ibnu-Afdel/dbwiz/internal/debuglog"
+	"github.com/Ibnu-Afdel/dbwiz/internal/omarchy"
 )
 
 // Timeouts bound every docker subprocess so a hung docker binary can never
@@ -50,7 +51,7 @@ func runDocker(ctx context.Context, extraEnv []string, args ...string) (stdout, 
 		return nil, nil, lookErr
 	}
 	debuglog.LogExec("docker", args)
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := dockerCommand(ctx, envKeys(extraEnv), args...)
 	if len(extraEnv) > 0 {
 		cmd.Env = append(os.Environ(), extraEnv...)
 	}
@@ -66,19 +67,17 @@ func runDocker(ctx context.Context, extraEnv []string, args ...string) (stdout, 
 // unexported form internally.
 func OnOmarchy() bool { return onOmarchy() }
 
-// onOmarchy reports whether this looks like an Omarchy machine, which lets
-// detection attach Omarchy's known default credentials to its stock containers.
-func onOmarchy() bool {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-	return omarchyDirExists(home)
-}
+// onOmarchy is a seam over omarchy.Detect, which lets detection attach Omarchy's
+// known default credentials to its stock containers.
+var onOmarchy = omarchy.Detect
 
-// omarchyDirExists is the testable core of onOmarchy: Omarchy installs its
-// payload under ~/.local/share/omarchy.
-func omarchyDirExists(home string) bool {
-	info, err := os.Stat(filepath.Join(home, ".local", "share", "omarchy"))
-	return err == nil && info.IsDir()
+// envKeys returns the variable names from KEY=VALUE pairs, for forwarding
+// through sudo by name.
+func envKeys(env []string) []string {
+	keys := make([]string, 0, len(env))
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		keys = append(keys, k)
+	}
+	return keys
 }

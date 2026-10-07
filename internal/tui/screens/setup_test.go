@@ -13,7 +13,7 @@ import (
 func TestSetupMenuRenders(t *testing.T) {
 	s := NewSetup(nil)
 	got := s.View(100, 30)
-	for _, want := range []string{"Set up a new database server", "postgres", "mysql", "mariadb", "postgis", "No sudo"} {
+	for _, want := range []string{"Set up a new database server", "postgres", "mysql", "mariadb", "postgis", "Omarchy-compatible"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("setup view missing %q:\n%s", want, got)
 		}

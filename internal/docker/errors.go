@@ -68,6 +68,8 @@ func classifyRun(op string, ctx context.Context, err error, stderr []byte) *Dock
 	}
 	s := string(stderr)
 	switch {
+	case sudoNeedsPassword(s):
+		return errSudoExpired(err)
 	case strings.Contains(s, "permission denied") && strings.Contains(s, "docker.sock"):
 		return errSocketPermission(err)
 	case strings.Contains(s, "Cannot connect to the Docker daemon"),
@@ -132,7 +134,21 @@ func errSocketPermission(err error) *DockerError {
 		Kind:   DockerErrSocketPermission,
 		Title:  "No permission to reach Docker",
 		Detail: "Your user can't access the Docker socket, so containers can't be listed.",
-		Hint:   "add yourself to the docker group: sudo usermod -aG docker $USER (then re-login)",
+		Hint:   permissionHint(),
+		Err:    err,
+	}
+}
+
+// errSudoExpired is the permission error in sudo mode: sudo's cached
+// credentials ran out (or were never cached), and DBWiz won't prompt behind the
+// TUI's back. It shares the SocketPermission kind so the same [s] key
+// re-authorizes.
+func errSudoExpired(err error) *DockerError {
+	return &DockerError{
+		Kind:   DockerErrSocketPermission,
+		Title:  "Sudo needs your password again",
+		Detail: "DBWiz reaches Docker through sudo this session, and sudo's cached password has expired.",
+		Hint:   "press [s] to enter it again",
 		Err:    err,
 	}
 }
@@ -147,9 +163,9 @@ func ErrNoContainers() *DockerError { return errNoContainers(onOmarchy()) }
 // succeeded but found no database containers. The hint differs on Omarchy,
 // where a single script provisions them.
 func errNoContainers(onOmarchy bool) *DockerError {
-	hint := "start one with: docker run -d -p 5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres"
+	hint := "press [s] to set one up, or: docker run -d -p 5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres"
 	if onOmarchy {
-		hint = "provision databases with: omarchy-install-docker-dbs"
+		hint = "press [s] to set one up, or use Omarchy's installer: omarchy install docker dbs"
 	}
 	return &DockerError{
 		Kind:   DockerErrNoContainers,

@@ -58,15 +58,33 @@ func (s errorScreen) withAlt(a altSpec) errorScreen {
 	return s
 }
 
-// NewErrorFromDocker builds the error screen from a typed docker failure.
+// NewErrorFromDocker builds the error screen from a typed docker failure. A
+// socket-permission failure also offers [s]: authorize sudo once, then route
+// DBWiz's docker calls through it and retry — the way Omarchy 4, which keeps
+// users out of the docker group, expects Docker to be reached.
 func NewErrorFromDocker(e *docker.DockerError, retry retrySpec) Screen {
-	return errorScreen{
+	s := errorScreen{
 		title:  e.Title,
 		detail: e.Detail,
 		hint:   e.Hint,
 		info:   errText(e.Err),
 		retry:  retry,
 	}
+	if e.Kind == docker.DockerErrSocketPermission && docker.SudoAvailable() {
+		s = s.withAlt(altSpec{key: "s", label: "use sudo", cmd: authorizeSudo()})
+	}
+	return s
+}
+
+// sudoAuthMsg reports how the `sudo -v` prompt ended.
+type sudoAuthMsg struct{ err error }
+
+// authorizeSudo suspends the TUI and hands the terminal to `sudo -v`, so the
+// password prompt is sudo's own, never typed into DBWiz.
+func authorizeSudo() tea.Cmd {
+	return tea.ExecProcess(docker.AuthorizeSudo(), func(err error) tea.Msg {
+		return sudoAuthMsg{err: err}
+	})
 }
 
 // NewErrorFromDB builds the error screen from a typed db failure (used for
@@ -85,6 +103,17 @@ func NewErrorFromDB(e *db.DBError, retry retrySpec) Screen {
 func (s errorScreen) Init() tea.Cmd { return nil }
 
 func (s errorScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
+	if m, ok := msg.(sudoAuthMsg); ok {
+		if m.err != nil {
+			s.hint = "sudo didn't authorize (" + m.err.Error() + ") — press [s] to try again"
+			return s, nil
+		}
+		docker.SetSudo(true)
+		if s.retry.cmd != nil {
+			return s, s.retry.cmd
+		}
+		return s, Replace(NewDetect())
+	}
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return s, nil
