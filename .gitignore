@@ -1,4 +1,4 @@
-# Planning pipeline (local context for Ibnu + AI agents — never committed)
+# Local planning notes (never committed)
 plan/
 
 # Editor
@@ -8,3 +8,6 @@ plan/
 /dbwiz
 dist/
 *.log
+
+# Local Claude Code settings
+.claude/

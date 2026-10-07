@@ -15,7 +15,7 @@ import (
 // Integration tests run only under `-tags integration` against a live server,
 // configured the same way internal/db's are:
 //
-//	KASE_PG_HOST KASE_PG_PORT KASE_PG_USER KASE_PG_PASS KASE_PG_DB
+//	DBWIZ_PG_HOST DBWIZ_PG_PORT DBWIZ_PG_USER DBWIZ_PG_PASS DBWIZ_PG_DB
 //
 // This is the only way to check the Postgres parser against a real catalog. The
 // JSON field names ("Node Type", "Plan Rows", "Actual Total Time", …) are the
@@ -23,17 +23,17 @@ import (
 // it was told to expect, not that a server says it.
 func livePGEngine(t *testing.T) db.Engine {
 	t.Helper()
-	port, _ := strconv.Atoi(liveEnv("KASE_PG_PORT", "5432"))
+	port, _ := strconv.Atoi(liveEnv("DBWIZ_PG_PORT", "5432"))
 	engine, err := db.New(db.KindPostgres)
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
 	target := db.Target{
-		Host:     liveEnv("KASE_PG_HOST", "127.0.0.1"),
+		Host:     liveEnv("DBWIZ_PG_HOST", "127.0.0.1"),
 		Port:     port,
-		User:     liveEnv("KASE_PG_USER", "fawz"),
-		Password: liveEnv("KASE_PG_PASS", "password"),
-		Database: liveEnv("KASE_PG_DB", "postgres"),
+		User:     liveEnv("DBWIZ_PG_USER", "fawz"),
+		Password: liveEnv("DBWIZ_PG_PASS", "password"),
+		Database: liveEnv("DBWIZ_PG_DB", "postgres"),
 	}
 	if err := engine.Connect(context.Background(), target); err != nil {
 		t.Fatalf("connect: %v", err)

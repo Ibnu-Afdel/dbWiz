@@ -10,29 +10,29 @@ import (
 	"time"
 )
 
-// MySQL integration tests. Enable with KASE_MY=1 (they need a running MySQL or
+// MySQL integration tests. Enable with DBWIZ_MY=1 (they need a running MySQL or
 // MariaDB, which the Postgres tests don't require). Defaults match a local
 // mysql8 container; the user must be able to create databases and users.
 //
-//	KASE_MY_HOST KASE_MY_PORT KASE_MY_USER KASE_MY_PASS
+//	DBWIZ_MY_HOST DBWIZ_MY_PORT DBWIZ_MY_USER DBWIZ_MY_PASS
 func myTarget(t *testing.T) Target {
 	t.Helper()
-	if env("KASE_MY", "") == "" {
-		t.Skip("set KASE_MY=1 to run MySQL integration tests")
+	if env("DBWIZ_MY", "") == "" {
+		t.Skip("set DBWIZ_MY=1 to run MySQL integration tests")
 	}
-	port, _ := strconv.Atoi(env("KASE_MY_PORT", "3306"))
+	port, _ := strconv.Atoi(env("DBWIZ_MY_PORT", "3306"))
 	return Target{
-		Host:     env("KASE_MY_HOST", "127.0.0.1"),
+		Host:     env("DBWIZ_MY_HOST", "127.0.0.1"),
 		Port:     port,
-		User:     env("KASE_MY_USER", "root"),
-		Password: env("KASE_MY_PASS", "password"),
+		User:     env("DBWIZ_MY_USER", "root"),
+		Password: env("DBWIZ_MY_PASS", "password"),
 	}
 }
 
-// newMyEngine builds the engine under test. KASE_MY_KIND=mariadb exercises the
+// newMyEngine builds the engine under test. DBWIZ_MY_KIND=mariadb exercises the
 // MariaDB label/path; anything else uses MySQL. Both share the implementation.
 func newMyEngine() *MySQL {
-	if env("KASE_MY_KIND", "mysql") == "mariadb" {
+	if env("DBWIZ_MY_KIND", "mysql") == "mariadb" {
 		return NewMariaDB()
 	}
 	return NewMySQL()

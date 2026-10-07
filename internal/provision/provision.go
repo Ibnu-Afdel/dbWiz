@@ -1,6 +1,6 @@
 // Package provision creates database containers, not just databases (v3 1.1). It
 // mirrors Omarchy's omarchy-install-docker-dbs defaults — same names, images,
-// host ports, and dev-friendly auth (see 01-RESEARCH.md §1) — so a container
+// host ports, and dev-friendly auth — so a container
 // DBWiz sets up and one Omarchy sets up are interchangeable, and either connects
 // with zero configuration.
 //

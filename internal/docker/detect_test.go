@@ -92,8 +92,8 @@ func TestOmarchyCreds(t *testing.T) {
 	}
 }
 
-// realMachineFixture is the verified `docker ps -a` from 01-RESEARCH.md §2,
-// as newline-delimited JSON (the format docker emits).
+// realMachineFixture is a `docker ps -a` captured from a real development
+// machine, as newline-delimited JSON (the format docker emits).
 const realMachineFixture = `{"Image":"pgvector/pgvector:pg16","Names":"fawz-postgres","Ports":"0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp","State":"running"}
 {"Image":"ghcr.io/umami-software/umami:postgresql-latest","Names":"fawz-umami","Ports":"0.0.0.0:3007->3000/tcp","State":"running"}
 {"Image":"mysql:8.4","Names":"tena-inventory-mysql-1","Ports":"","State":"exited"}

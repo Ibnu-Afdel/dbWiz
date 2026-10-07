@@ -16,16 +16,16 @@ import (
 // Point them at one with env vars; defaults match a local Omarchy-style
 // container. The connecting user must be a superuser (create db/role).
 //
-//	KASE_PG_HOST KASE_PG_PORT KASE_PG_USER KASE_PG_PASS KASE_PG_DB
+//	DBWIZ_PG_HOST DBWIZ_PG_PORT DBWIZ_PG_USER DBWIZ_PG_PASS DBWIZ_PG_DB
 func pgTarget(t *testing.T) Target {
 	t.Helper()
-	port, _ := strconv.Atoi(env("KASE_PG_PORT", "5432"))
+	port, _ := strconv.Atoi(env("DBWIZ_PG_PORT", "5432"))
 	return Target{
-		Host:     env("KASE_PG_HOST", "127.0.0.1"),
+		Host:     env("DBWIZ_PG_HOST", "127.0.0.1"),
 		Port:     port,
-		User:     env("KASE_PG_USER", "fawz"),
-		Password: env("KASE_PG_PASS", "password"),
-		Database: env("KASE_PG_DB", "postgres"),
+		User:     env("DBWIZ_PG_USER", "postgres"),
+		Password: env("DBWIZ_PG_PASS", "password"),
+		Database: env("DBWIZ_PG_DB", "postgres"),
 	}
 }
 
@@ -347,7 +347,7 @@ func TestPGTableDDL(t *testing.T) {
 	ctx := context.Background()
 	e := connectPG(t)
 
-	dbname := "kase_ddl_" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	dbname := "dbwiz_ddl_" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	if err := e.CreateDatabase(ctx, dbname, CreateOpts{}); err != nil {
 		t.Fatalf("create database: %v", err)
 	}

@@ -4,9 +4,6 @@
 
 DBWiz detects the databases running in your local Docker containers (running *and* stopped), lets you browse tables and rows without writing SQL, do the common admin chores, and run real queries — all from one friendly TUI. It has first-class support for [Omarchy](https://omarchy.org)'s Docker database setup and works with any Docker container on any Linux, plus standalone SQLite files.
 
-<!-- TODO(Ibnu): add a demo GIF and a couple of screenshots here before tagging v1.0.0
-     e.g. docs/demo.gif (detect → dashboard → query) -->
-
 ## Features
 
 - **Zero-config detection** — finds your PostgreSQL / MySQL / MariaDB containers automatically. Stopped ones are listed too and can be **started with a keypress**.
@@ -98,7 +95,7 @@ A malformed file is reported on stderr and DBWiz launches with defaults; a missi
 
 ## Keys
 
-The help bar at the bottom always reflects where you are; press `?` for the full keymap. The essentials:
+The help bar at the bottom always reflects where you are; press `?` for the keys on the current screen, `F1` (or `dbwiz keys`) for all of them. For a one-page reference see [`cheatsheet.md`](cheatsheet.md), and for a guided tour of every feature, [`LEARN.md`](LEARN.md). The essentials:
 
 | Key | Action |
 |---|---|
@@ -140,8 +137,8 @@ go test ./...                # unit tests (no Docker needed)
 go test -tags integration ./internal/db/...  # live DB tests (need running containers)
 ```
 
-Planning and roadmap live in a local `plan/` directory (gitignored).
+The integration tests default to a local `postgres` superuser on `127.0.0.1:5432` (what `dbwiz setup postgres` or `omarchy install docker dbs` gives you); point them elsewhere with `DBWIZ_PG_HOST`, `DBWIZ_PG_PORT`, `DBWIZ_PG_USER`, `DBWIZ_PG_PASS`, `DBWIZ_PG_DB`, and enable the MySQL/MariaDB suite with `DBWIZ_MY=1` (`DBWIZ_MY_*` for its connection).
 
 ## License
 
-MIT
+[MIT](LICENSE)

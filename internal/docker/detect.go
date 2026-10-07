@@ -13,7 +13,7 @@ import (
 // imageEngines maps a normalized image repository to the engine it runs.
 // Classification is by repository only — never by container name or image tag
 // (an app tagged ":postgresql-latest" is not a database). The list covers the
-// common official images and their popular variants; see 01-RESEARCH.md §1–2.
+// common official images and their popular variants.
 var imageEngines = map[string]Engine{
 	"postgres":              EnginePostgres,
 	"pgvector/pgvector":     EnginePostgres,
