@@ -28,10 +28,18 @@ SQLite has no user/permission concept, so that UI is simply absent for it — no
 ## Install
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/Ibnu-Afdel/dbWiz/main/install.sh | sh
+```
+
+The script downloads the static binary for your CPU (x86_64 or arm64), verifies its SHA-256 checksum, and installs it to `~/.local/bin` — no sudo. ([Read it first](install.sh) if you like; `DBWIZ_VERSION` and `DBWIZ_INSTALL_DIR` override the defaults.)
+
+With Go:
+
+```bash
 go install github.com/Ibnu-Afdel/dbwiz@latest
 ```
 
-Or grab a prebuilt static binary from the [Releases](https://github.com/Ibnu-Afdel/dbwiz/releases) page and put it on your `PATH`.
+Or grab a binary from the [Releases](https://github.com/Ibnu-Afdel/dbWiz/releases) page and put it on your `PATH`.
 
 Then, optionally, add it to your app launcher (any Linux desktop; on Omarchy it also joins the Omarchy menu):
 

@@ -11,3 +11,11 @@ dist/
 
 # Local Claude Code settings
 .claude/
+
+# makepkg output when building the AUR package in place
+packaging/aur/*/src/
+packaging/aur/*/pkg/
+packaging/aur/*/*.pkg.tar.*
+packaging/aur/*/dbwiz-*-x86_64
+packaging/aur/*/dbwiz-*-aarch64
+packaging/aur/*/LICENSE-*
